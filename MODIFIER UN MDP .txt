@@ -1,0 +1,3 @@
+Ouvrir le cmd dans le dossier public 
+-node server.js (mettre dans le cmd)
+double cliquer sur le fichier reset password 
