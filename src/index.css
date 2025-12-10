@@ -1,0 +1,210 @@
+/* ✅ Import Google Fonts (plus léger, même rendu) */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+/* Ensuite @tailwind */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 3%;
+    --foreground: 0 0% 95%;
+
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 95%;
+
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 95%;
+
+    --primary: 180 100% 50%;
+    --primary-foreground: 0 0% 3%;
+
+    --secondary: 300 100% 50%;
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+
+    --accent: 180 100% 50%;
+    --accent-foreground: 0 0% 3%;
+
+    --destructive: 300 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 18%;
+    --input: 0 0% 15%;
+    --ring: 180 100% 50%;
+
+    --radius: 0.75rem;
+
+    /* Custom Gaming Colors */
+    --neon-cyan: 180 100% 50%;
+    --neon-magenta: 300 100% 50%;
+    --surface: 0 0% 10%;
+    --surface-alt: 0 0% 15%;
+    --gold: 45 100% 50%;
+    --silver: 0 0% 75%;
+    --bronze: 30 60% 45%;
+
+    /* Glow Effects */
+    --glow-cyan: 0 0 20px hsla(180, 100%, 50%, 0.6), 0 0 40px hsla(180, 100%, 50%, 0.3);
+    --glow-magenta: 0 0 20px hsla(300, 100%, 50%, 0.6), 0 0 40px hsla(300, 100%, 50%, 0.3);
+    --glow-gold: 0 0 20px hsla(45, 100%, 50%, 0.6), 0 0 40px hsla(45, 100%, 50%, 0.3);
+
+    --sidebar-background: 0 0% 8%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 180 100% 50%;
+    --sidebar-primary-foreground: 0 0% 3%;
+    --sidebar-accent: 0 0% 15%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 0 0% 18%;
+    --sidebar-ring: 180 100% 50%;
+  }
+
+  .dark {
+    --background: 0 0% 3%;
+    --foreground: 0 0% 95%;
+    --card: 0 0% 10%;
+    --card-foreground: 0 0% 95%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 180 100% 50%;
+    --primary-foreground: 0 0% 3%;
+    --secondary: 300 100% 50%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 15%;
+    --muted-foreground: 0 0% 60%;
+    --accent: 180 100% 50%;
+    --accent-foreground: 0 0% 3%;
+    --destructive: 300 100% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 18%;
+    --input: 0 0% 15%;
+    --ring: 180 100% 50%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    font-family: 'Poppins', sans-serif;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    background: 
+      radial-gradient(ellipse at 20% 20%, hsla(180, 100%, 50%, 0.03) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, hsla(300, 100%, 50%, 0.03) 0%, transparent 50%),
+      hsl(var(--background));
+  }
+}
+
+@layer utilities {
+  .glow-cyan {
+    box-shadow: var(--glow-cyan);
+  }
+
+  .glow-magenta {
+    box-shadow: var(--glow-magenta);
+  }
+
+  .glow-gold {
+    box-shadow: var(--glow-gold);
+  }
+
+  .text-glow-cyan {
+    text-shadow: 0 0 10px hsla(180, 100%, 50%, 0.8), 0 0 20px hsla(180, 100%, 50%, 0.5);
+  }
+
+  .text-glow-magenta {
+    text-shadow: 0 0 10px hsla(300, 100%, 50%, 0.8), 0 0 20px hsla(300, 100%, 50%, 0.5);
+  }
+
+  .text-glow-gold {
+    text-shadow: 0 0 10px hsla(45, 100%, 50%, 0.8), 0 0 20px hsla(45, 100%, 50%, 0.5);
+  }
+
+  .neon-border-cyan {
+    border: 1px solid hsl(var(--neon-cyan));
+    box-shadow: 0 0 10px hsla(180, 100%, 50%, 0.4), inset 0 0 10px hsla(180, 100%, 50%, 0.1);
+  }
+
+  .neon-border-magenta {
+    border: 1px solid hsl(var(--neon-magenta));
+    box-shadow: 0 0 10px hsla(300, 100%, 50%, 0.4), inset 0 0 10px hsla(300, 100%, 50%, 0.1);
+  }
+
+  .gradient-gaming {
+    background: linear-gradient(135deg, hsla(180, 100%, 50%, 0.2) 0%, hsla(300, 100%, 50%, 0.2) 100%);
+  }
+
+  .card-rarity-bronze {
+    background: linear-gradient(135deg, #cd7f32 0%, #b8860b 100%);
+  }
+
+  .card-rarity-silver {
+    background: linear-gradient(135deg, #c0c0c0 0%, #a8a8a8 100%);
+  }
+
+  .card-rarity-gold {
+    background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+  }
+
+  .card-rarity-espoir {
+    background: linear-gradient(135deg, #3b82f6 0%, #60a5fa 100%);
+  }
+
+  .card-rarity-icone {
+    background: linear-gradient(135deg, #a855f7 0%, #c084fc 100%);
+  }
+
+  .card-rarity-future-star {
+    background: linear-gradient(135deg, #06b6d4 0%, #22d3ee 100%);
+  }
+
+  .card-rarity-god {
+    background: linear-gradient(135deg, #9333ea 0%, #a855f7 100%);
+    box-shadow: 0 0 20px rgba(147, 51, 234, 0.5);
+  }
+
+  .card-rarity-creator {
+    background: linear-gradient(135deg, #ec4899 0%, #f472b6 100%);
+    box-shadow: 0 0 20px rgba(236, 72, 153, 0.5);
+  }
+
+  .card-rarity-unknown {
+    background: linear-gradient(135deg, #6b7280 0%, #9ca3af 100%);
+  }
+
+  @keyframes creator-pulse {
+    0%, 100% {
+      box-shadow: 0 0 25px hsla(300, 100%, 50%, 0.8), 0 0 50px hsla(330, 100%, 50%, 0.4);
+    }
+    50% {
+      box-shadow: 0 0 35px hsla(300, 100%, 50%, 1), 0 0 70px hsla(330, 100%, 50%, 0.6);
+    }
+  }
+
+  .animate-float {
+    animation: float 3s ease-in-out infinite;
+  }
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+
+  .animate-pulse-glow {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+  }
+}
+
