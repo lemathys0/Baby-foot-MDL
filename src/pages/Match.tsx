@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Swords, History, Timer, Loader2, Plus } from "lucide-react";
+import { Swords, History, Timer, Loader2, Plus, Edit } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { MatchQueue } from "@/components/match/MatchQueue";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,7 @@ const MatchPage = () => {
   const { user, userProfile } = useAuth();
   const navigate = useNavigate();
   const [isInQueue, setIsInQueue] = useState(false);
-  const [queuedPlayers, setQueuedPlayers] = useState<QueuedPlayer[]>([]);
+  const [queuedPlayers, setQueuedPlayers] = useState<QueuePlayer[]>([]);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
@@ -141,9 +141,12 @@ const MatchPage = () => {
     return `Équipe ${team}`;
   };
 
+  // Tout le monde peut enregistrer un match
+  const canRecordMatch = true;
+
   return (
     <AppLayout>
-      {/* Header avec bouton Créer Match */}
+      {/* Header avec boutons */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -159,14 +162,27 @@ const MatchPage = () => {
           </div>
         </div>
         
-        <Button 
-          onClick={() => navigate("/betting")}
-          variant="neon"
-          className="gap-2"
-        >
-          <Plus className="h-4 w-4" />
-          Créer Match avec Paris
-        </Button>
+        <div className="flex gap-2">
+          {/* Bouton Enregistrer Match (accessible à tous) */}
+          <Button 
+            onClick={() => navigate("/record-match")}
+            variant="outline"
+            className="gap-2"
+          >
+            <Edit className="h-4 w-4" />
+            Enregistrer Match
+          </Button>
+          
+          {/* Bouton Match avec Paris */}
+          <Button 
+            onClick={() => navigate("/betting")}
+            variant="neon"
+            className="gap-2"
+          >
+            <Plus className="h-4 w-4" />
+            Match avec Paris
+          </Button>
+        </div>
       </motion.div>
 
       {/* Match Queue */}
@@ -195,7 +211,7 @@ const MatchPage = () => {
         )}
       </motion.div>
 
-      {/* Tournament Reminder - ✅ BOUTON CORRIGÉ */}
+      {/* Tournament Reminder */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -251,13 +267,13 @@ const MatchPage = () => {
                       initial={{ opacity: 0, x: -20 }}
                       animate={{ opacity: 1, x: 0 }}
                       transition={{ delay: 0.4 + index * 0.1 }}
-                      className="rounded-lg bg-surface-alt p-4"
+                      className="rounded-lg bg-surface-alt p-4 hover:bg-surface-alt/70 transition-colors"
                     >
                       <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
                         <span>{formatDate(match.date)}</span>
                         <span
                           className={
-                            match.score1 > match.score2 ? "text-primary" : "text-secondary"
+                            match.score1 > match.score2 ? "text-primary" : "text-red-500"
                           }
                         >
                           {match.score1 > match.score2 ? "Équipe 1 gagne" : "Équipe 2 gagne"}
@@ -283,7 +299,7 @@ const MatchPage = () => {
                           <span
                             className={`text-2xl font-bold ${
                               match.score2 > match.score1
-                                ? "text-primary text-glow-cyan"
+                                ? "text-red-500"
                                 : "text-muted-foreground"
                             }`}
                           >

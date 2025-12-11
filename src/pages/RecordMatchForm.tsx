@@ -1,6 +1,6 @@
 // src/pages/RecordMatchForm.tsx
 import { useState, useEffect } from 'react';
-import { Loader2, Zap, Users, Trophy, TrendingUp, TrendingDown, ArrowLeft } from 'lucide-react';
+import { Loader2, Zap, Users, Trophy, TrendingUp, TrendingDown, ArrowLeft, X } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -126,6 +126,7 @@ const RecordMatchForm = () => {
         duration: 5000,
       });
 
+      // Réinitialiser le formulaire
       setTeam1Ids([]);
       setTeam2Ids([]);
       setScore1(0);
@@ -144,6 +145,7 @@ const RecordMatchForm = () => {
   };
   
   const togglePlayer = (playerId: string, team: 1 | 2) => {
+    // Retirer le joueur de l'équipe adverse s'il y est
     if (team === 1 && team2Ids.includes(playerId)) {
       setTeam2Ids(team2Ids.filter(id => id !== playerId));
     }
@@ -155,8 +157,10 @@ const RecordMatchForm = () => {
     const setter = team === 1 ? setTeam1Ids : setTeam2Ids;
 
     if (currentTeam.includes(playerId)) {
+      // Désélectionner le joueur
       setter(currentTeam.filter(id => id !== playerId));
     } else {
+      // Ajouter le joueur si la limite n'est pas atteinte
       if (currentTeam.length < 2) { 
         setter([...currentTeam, playerId]);
       } else {
@@ -167,6 +171,21 @@ const RecordMatchForm = () => {
          });
       }
     }
+  };
+
+  // Obtenir le nom d'un joueur par son ID
+  const getPlayerName = (playerId: string) => {
+    return availablePlayers.find(p => p.id === playerId)?.username || 'Inconnu';
+  };
+
+  // Calculer l'ELO moyen d'une équipe
+  const getTeamAvgElo = (teamIds: string[]) => {
+    if (teamIds.length === 0) return 0;
+    const totalElo = teamIds.reduce((sum, id) => {
+      const player = availablePlayers.find(p => p.id === id);
+      return sum + (player?.eloRating || 0);
+    }, 0);
+    return Math.round(totalElo / teamIds.length);
   };
   
   if (isLoadingPlayers) {
@@ -207,6 +226,59 @@ const RecordMatchForm = () => {
       </motion.div>
 
       <div className="max-w-4xl mx-auto space-y-6">
+        {/* Récapitulatif des équipes */}
+        {(team1Ids.length > 0 || team2Ids.length > 0) && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <Card className="border-primary/30">
+              <CardContent className="p-4">
+                <div className="grid grid-cols-3 gap-4 items-center">
+                  {/* Équipe 1 */}
+                  <div className="text-center">
+                    <p className="text-sm text-muted-foreground mb-2">Équipe 1</p>
+                    <div className="space-y-1">
+                      {team1Ids.length > 0 ? (
+                        <>
+                          {team1Ids.map(id => (
+                            <div key={id} className="text-sm font-medium">{getPlayerName(id)}</div>
+                          ))}
+                          <p className="text-xs text-primary mt-2">ELO moyen: {getTeamAvgElo(team1Ids)}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Aucun joueur</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* VS */}
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-primary">VS</div>
+                  </div>
+
+                  {/* Équipe 2 */}
+                  <div className="text-center">
+                    <p className="text-sm text-muted-foreground mb-2">Équipe 2</p>
+                    <div className="space-y-1">
+                      {team2Ids.length > 0 ? (
+                        <>
+                          {team2Ids.map(id => (
+                            <div key={id} className="text-sm font-medium">{getPlayerName(id)}</div>
+                          ))}
+                          <p className="text-xs text-red-500 mt-2">ELO moyen: {getTeamAvgElo(team2Ids)}</p>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Aucun joueur</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -223,13 +295,18 @@ const RecordMatchForm = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Équipe 1 */}
                   <div className="space-y-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
-                    <label className="font-semibold text-lg flex items-center text-primary">
-                      <Users className="h-4 w-4 mr-1" /> Équipe 1 ({team1Ids.length}/2)
+                    <label className="font-semibold text-lg flex items-center justify-between text-primary">
+                      <span className="flex items-center">
+                        <Users className="h-4 w-4 mr-1" /> Équipe 1
+                      </span>
+                      <span className="text-sm">({team1Ids.length}/2)</span>
                     </label>
                     <div className="space-y-1 max-h-64 overflow-y-auto pr-2">
                       {availablePlayers.map(p => {
                           const isSelected = team1Ids.includes(p.id);
+                          const isInOtherTeam = team2Ids.includes(p.id);
                           return (
                               <div
                                   key={p.id}
@@ -237,12 +314,14 @@ const RecordMatchForm = () => {
                                   className={`flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${
                                       isSelected 
                                           ? 'bg-primary text-primary-foreground font-bold shadow-md' 
+                                          : isInOtherTeam
+                                          ? 'bg-red-500/20 opacity-50 cursor-not-allowed'
                                           : 'bg-surface-alt hover:bg-surface-alt/70'
                                   }`}
                               >
-                                  <span>{p.username}</span>
-                                  <span className={`text-sm ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
-                                      ELO: {p.eloRating}
+                                  <span className="truncate">{p.username}</span>
+                                  <span className={`text-sm ml-2 ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                                      {p.eloRating}
                                   </span>
                               </div>
                           );
@@ -250,13 +329,18 @@ const RecordMatchForm = () => {
                     </div>
                   </div>
 
+                  {/* Équipe 2 */}
                   <div className="space-y-3 p-3 rounded-lg border border-red-500/20 bg-red-500/5">
-                    <label className="font-semibold text-lg flex items-center text-red-500">
-                      <Users className="h-4 w-4 mr-1" /> Équipe 2 ({team2Ids.length}/2)
+                    <label className="font-semibold text-lg flex items-center justify-between text-red-500">
+                      <span className="flex items-center">
+                        <Users className="h-4 w-4 mr-1" /> Équipe 2
+                      </span>
+                      <span className="text-sm">({team2Ids.length}/2)</span>
                     </label>
                     <div className="space-y-1 max-h-64 overflow-y-auto pr-2">
                       {availablePlayers.map(p => {
                           const isSelected = team2Ids.includes(p.id);
+                          const isInOtherTeam = team1Ids.includes(p.id);
                           return (
                               <div
                                   key={p.id}
@@ -264,12 +348,14 @@ const RecordMatchForm = () => {
                                   className={`flex justify-between items-center p-2 rounded-md cursor-pointer transition-colors ${
                                       isSelected 
                                           ? 'bg-red-500 text-primary-foreground font-bold shadow-md' 
+                                          : isInOtherTeam
+                                          ? 'bg-primary/20 opacity-50 cursor-not-allowed'
                                           : 'bg-surface-alt hover:bg-surface-alt/70'
                                   }`}
                               >
-                                  <span>{p.username}</span>
-                                  <span className={`text-sm ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
-                                      ELO: {p.eloRating}
+                                  <span className="truncate">{p.username}</span>
+                                  <span className={`text-sm ml-2 ${isSelected ? 'text-primary-foreground/80' : 'text-muted-foreground'}`}>
+                                      {p.eloRating}
                                   </span>
                               </div>
                           );
@@ -278,6 +364,7 @@ const RecordMatchForm = () => {
                   </div>
                 </div>
                 
+                {/* Scores */}
                 <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
                   <div className="space-y-2">
                     <label htmlFor="score1" className="block text-sm font-medium text-primary">
@@ -309,29 +396,48 @@ const RecordMatchForm = () => {
                   </div>
                 </div>
                 
-                <Button 
-                  type="submit" 
-                  className="w-full mt-4" 
-                  variant="neon"
-                  disabled={isRecording || team1Ids.length === 0 || team2Ids.length === 0}
-                >
-                  {isRecording ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Enregistrement...
-                    </>
-                  ) : (
-                    <>
-                      <Trophy className="mr-2 h-4 w-4" />
-                      Enregistrer le Match
-                    </>
-                  )}
-                </Button>
+                {/* Boutons */}
+                <div className="flex gap-3">
+                  <Button 
+                    type="button"
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setTeam1Ids([]);
+                      setTeam2Ids([]);
+                      setScore1(0);
+                      setScore2(0);
+                    }}
+                    disabled={isRecording}
+                  >
+                    <X className="mr-2 h-4 w-4" />
+                    Réinitialiser
+                  </Button>
+                  <Button 
+                    type="submit" 
+                    className="flex-1" 
+                    variant="neon"
+                    disabled={isRecording || team1Ids.length === 0 || team2Ids.length === 0}
+                  >
+                    {isRecording ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Enregistrement...
+                      </>
+                    ) : (
+                      <>
+                        <Trophy className="mr-2 h-4 w-4" />
+                        Enregistrer le Match
+                      </>
+                    )}
+                  </Button>
+                </div>
               </form>
             </CardContent>
           </Card>
         </motion.div>
 
+        {/* ELO Updates */}
         {showEloUpdates && eloUpdates.length > 0 && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -357,7 +463,7 @@ const RecordMatchForm = () => {
                       <span className="text-muted-foreground">→</span>
                       <span className="font-bold text-primary">{update.newElo}</span>
                       <span 
-                        className={`flex items-center gap-1 font-semibold ${
+                        className={`flex items-center gap-1 font-semibold min-w-[80px] justify-end ${
                           update.eloChange > 0 ? 'text-green-500' : 'text-red-500'
                         }`}
                       >

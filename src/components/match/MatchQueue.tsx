@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Users, Clock, Play, Loader2 } from "lucide-react";
+import { Users, Clock, Play, Loader2, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -56,7 +56,7 @@ export function MatchQueue({
               >
                 {player ? (
                   <>
-                    <span className="text-2xl">👤</span>
+                    <User className="h-8 w-8 text-primary" />
                     <span className="mt-1 text-xs font-medium truncate w-full text-center px-1">
                       {player.username}
                     </span>
@@ -126,3 +126,4 @@ export function MatchQueue({
     </Card>
   );
 }
+

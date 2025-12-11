@@ -16,6 +16,7 @@ import {
   contributeToClub,
   buyClubBonus,
   leaveClub,
+  onClubDataUpdate,
   type Club,
   type ClubMember,
 } from "@/lib/firebaseExtended";
@@ -75,7 +76,7 @@ const Clubs = () => {
 
     const userRef = ref(database, `users/${user.uid}`);
     
-    const unsubscribe = onValue(userRef, async (snapshot) => {
+    const unsubscribeUser = onValue(userRef, async (snapshot) => {
       if (!snapshot.exists()) {
         setIsLoadingMyClub(false);
         return;
@@ -85,44 +86,38 @@ const Clubs = () => {
       setFortune(userData.fortune || 0);
       
       if (userData.clubId) {
-        const clubRef = ref(database, `clubs/${userData.clubId}`);
-        const clubSnapshot = await get(clubRef);
-        
-        if (clubSnapshot.exists()) {
-          const clubData = clubSnapshot.val();
-          setMyClub({ 
-            id: userData.clubId, 
-            ...clubData,
-            bonuses: clubData.bonuses || {},
-            treasury: clubData.treasury || 0,
-            totalEarnings: clubData.totalEarnings || 0,
-            members: clubData.members || []
-          });
-
-          const membersRef = ref(database, `clubMembers/${userData.clubId}`);
-          const membersSnapshot = await get(membersRef);
-          
-          if (membersSnapshot.exists()) {
-            const membersData = membersSnapshot.val();
-            const membersList: ClubMember[] = Object.values(membersData);
-            setMembers(membersList);
+        // Utiliser onClubDataUpdate pour les mises à jour en temps réel
+        const unsubscribeClub = onClubDataUpdate(userData.clubId, (clubData) => {
+          if (clubData) {
+            setMyClub(clubData);
+            
+            // Convertir l'objet members en tableau
+            const membersArray: ClubMember[] = clubData.members 
+              ? Object.values(clubData.members)
+              : [];
+            setMembers(membersArray);
           } else {
+            setMyClub(null);
             setMembers([]);
           }
-        } else {
-          setMyClub(null);
-        }
+          setIsLoadingMyClub(false);
+        });
+
+        // Retourner la fonction de nettoyage pour le club
+        return () => {
+          unsubscribeClub();
+        };
       } else {
         setMyClub(null);
+        setMembers([]);
+        setIsLoadingMyClub(false);
       }
-      
-      setIsLoadingMyClub(false);
     }, (error) => {
       console.error("Erreur chargement données utilisateur:", error);
       setIsLoadingMyClub(false);
     });
 
-    return () => unsubscribe();
+    return () => unsubscribeUser();
   }, [user]);
 
   // Load available clubs for joining
@@ -148,9 +143,9 @@ const Clubs = () => {
         founderId: data.founderId || "",
         treasury: data.treasury || 0,
         totalEarnings: data.totalEarnings || 0,
-        members: data.members || [],
+        members: data.members || {},
         bonuses: data.bonuses || {},
-        createdAt: data.createdAt || new Date().toISOString(),
+        createdAt: data.createdAt || Date.now(),
       }));
       
       // Filter by search term
@@ -204,7 +199,7 @@ const Clubs = () => {
       setSelectedLogo(CLUB_LOGOS[0]);
       setSelectedColor(CLUB_COLORS[0]);
       
-      window.location.reload();
+      // Les données seront rechargées automatiquement via onValue
     } catch (error: any) {
       console.error("Erreur création club:", error);
       toast({
@@ -236,7 +231,7 @@ const Clubs = () => {
           description: "Ce club n'existe plus",
           variant: "destructive",
         });
-        await loadAvailableClubs(); // Rafraîchir la liste
+        await loadAvailableClubs();
         return;
       }
 
@@ -262,7 +257,6 @@ const Clubs = () => {
 
       setShowJoinDialog(false);
       setSearchTerm("");
-      window.location.reload();
     } catch (error: any) {
       console.error("Erreur rejoindre club:", error);
       toast({
@@ -298,8 +292,6 @@ const Clubs = () => {
         title: "Club quitté",
         description: "Vous avez quitté le club avec succès",
       });
-
-      window.location.reload();
     } catch (error: any) {
       console.error("Erreur quitter club:", error);
       toast({
@@ -379,6 +371,12 @@ const Clubs = () => {
         variant: "destructive",
       });
     }
+  };
+
+  // Fonction helper pour obtenir le nombre de membres
+  const getMembersCount = (club: Club | null): number => {
+    if (!club || !club.members) return 0;
+    return Object.keys(club.members).length;
   };
 
   if (isLoadingMyClub) {
@@ -553,7 +551,7 @@ const Clubs = () => {
                               <div>
                                 <h3 className="font-bold text-lg">{club.name}</h3>
                                 <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                                  <span>{club.members?.length || 0} membre{(club.members?.length || 0) > 1 ? 's' : ''}</span>
+                                  <span>{getMembersCount(club)} membre{getMembersCount(club) > 1 ? 's' : ''}</span>
                                   <span>•</span>
                                   <span>{club.treasury || 0}€ de trésorerie</span>
                                 </div>
@@ -610,7 +608,7 @@ const Clubs = () => {
                 <div>
                   <CardTitle className="text-2xl">{myClub.name}</CardTitle>
                   <p className="text-sm text-muted-foreground">
-                    {(myClub.members?.length || 0)} membre{(myClub.members?.length || 0) > 1 ? "s" : ""}
+                    {getMembersCount(myClub)} membre{getMembersCount(myClub) > 1 ? "s" : ""}
                   </p>
                 </div>
               </div>
@@ -664,7 +662,7 @@ const Clubs = () => {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Membres actifs</span>
-                <span className="font-bold">{myClub.members?.length || 0}</span>
+                <span className="font-bold">{getMembersCount(myClub)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Bonus actifs</span>

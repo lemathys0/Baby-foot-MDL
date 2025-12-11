@@ -19,7 +19,8 @@ import Shop from "./pages/Shop";
 import Clubs from "./pages/Clubs";
 import Inventory from "./pages/Inventory";
 import Tournament from "./pages/Tournament";
-import AdminPanel from "./pages/AdminPanel"; // ✅ AJOUT DE L'IMPORT
+import AdminPanel from "./pages/AdminPanel";
+import RecordMatchForm from "./pages/RecordMatchForm"; // ✅ AJOUT
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const App = () => (
             <Routes>
               {/* Public routes */}
               <Route path="/auth" element={<Auth />} />
+              <Route path="/reset-password/:token" element={<ResetPassword />} />
               
               {/* Protected routes */}
               <Route
@@ -42,7 +44,16 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-<Route path="/inventory" element={<Inventory />} />
+              
+              <Route
+                path="/inventory"
+                element={
+                  <ProtectedRoute>
+                    <Inventory />
+                  </ProtectedRoute>
+                }
+              />
+              
               <Route
                 path="/admin"
                 element={
@@ -51,6 +62,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/leaderboard"
                 element={
@@ -59,6 +71,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/match"
                 element={
@@ -67,6 +80,17 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
+              {/* ✅ ROUTE AJOUTÉE */}
+              <Route
+                path="/record-match"
+                element={
+                  <ProtectedRoute>
+                    <RecordMatchForm />
+                  </ProtectedRoute>
+                }
+              />
+              
               <Route
                 path="/babydex"
                 element={
@@ -75,6 +99,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/betting"
                 element={
@@ -83,6 +108,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/profile"
                 element={
@@ -91,6 +117,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/shop"
                 element={
@@ -99,6 +126,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/clubs"
                 element={
@@ -107,6 +135,7 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
+              
               <Route
                 path="/tournament"
                 element={
@@ -115,8 +144,8 @@ const App = () => (
                   </ProtectedRoute>
                 }
               />
-              <Route path="/reset-password/:token" element={<ResetPassword />} />
               
+              {/* 404 */}
               <Route path="*" element={<NotFound />} />
             </Routes>
           </ThemeProvider>
