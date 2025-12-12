@@ -21,6 +21,7 @@ import {
   onMatchUpdate,
   MatchWithBetting 
 } from "@/lib/firebaseMatch";
+import { safeFirebaseQuery } from "@/utils/safeFirebaseQuery";
 
 type Player = { id: string; username: string; eloRating: number };
 
@@ -68,16 +69,47 @@ const BettingMatches = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [matchesData, playersData] = await Promise.all([
-        getOpenMatches(),
-        getAvailablePlayers()
+      // ✅ OPTIMISATION: Utiliser safeFirebaseQuery pour meilleure gestion d'erreurs
+      const [matchesResult, playersResult] = await Promise.all([
+        safeFirebaseQuery(() => getOpenMatches(), { 
+          errorMessage: "Impossible de charger les matchs",
+          retries: 2 
+        }),
+        safeFirebaseQuery(() => getAvailablePlayers(), { 
+          errorMessage: "Impossible de charger les joueurs",
+          retries: 2 
+        })
       ]);
-      setMatches(matchesData);
-      setAvailablePlayers(playersData);
-    } catch (error) {
+      
+      if (matchesResult.error) {
+        toast({
+          title: "Erreur",
+          description: matchesResult.error,
+          variant: "destructive"
+        });
+      } else if (matchesResult.data) {
+        setMatches(matchesResult.data);
+      }
+      
+      if (playersResult.error) {
+        toast({
+          title: "Erreur",
+          description: playersResult.error,
+          variant: "destructive"
+        });
+      } else if (playersResult.data) {
+        // Mapper les données pour utiliser eloGlobal comme eloRating (affichage général)
+        const mappedPlayers: Player[] = playersResult.data.map(p => ({
+          id: p.id,
+          username: p.username,
+          eloRating: p.eloGlobal,
+        }));
+        setAvailablePlayers(mappedPlayers);
+      }
+    } catch (error: any) {
       toast({
         title: "Erreur",
-        description: "Impossible de charger les données",
+        description: error.message || "Impossible de charger les données",
         variant: "destructive"
       });
     } finally {
@@ -287,23 +319,23 @@ const BettingMatches = () => {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-6 flex items-center justify-between"
+        className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <Button 
             variant="ghost" 
             size="icon"
             onClick={() => navigate('/match')}
             className="rounded-xl"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
-          <div className="rounded-xl bg-primary/20 p-3">
-            <Coins className="h-6 w-6 text-primary" />
+          <div className="rounded-xl bg-primary/20 p-2 sm:p-3">
+            <Coins className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Paris</h1>
-            <p className="text-sm text-muted-foreground">
+            <h1 className="text-lg sm:text-2xl font-bold">Paris</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">
               {agentFortune.toLocaleString()}€ disponibles
             </p>
           </div>
@@ -316,11 +348,11 @@ const BettingMatches = () => {
               Créer Match
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Créer un match avec paris</DialogTitle>
+              <DialogTitle className="text-lg sm:text-xl">Créer un match avec paris</DialogTitle>
             </DialogHeader>
-            <div className="grid grid-cols-2 gap-4 mt-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
               <div className="space-y-2">
                 <label className="font-semibold text-primary">Équipe 1 ({team1Ids.length}/2)</label>
                 <div className="space-y-1 max-h-64 overflow-y-auto">
@@ -434,8 +466,8 @@ const BettingMatches = () => {
                       </span>
                     </div>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid grid-cols-2 gap-4">
+                  <CardContent className="space-y-3 sm:space-y-4">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                       <div className="p-3 rounded-lg bg-primary/10">
                         <p className="text-sm text-muted-foreground">Équipe 1</p>
                         <p className="text-2xl font-bold text-primary">{match.totalBetsTeam1}€</p>
@@ -458,7 +490,7 @@ const BettingMatches = () => {
                     )}
 
                     {match.status === "open" && (
-                      <div className="flex gap-2">
+                      <div className="flex flex-col sm:flex-row gap-2">
                         <Input
                           type="number"
                           placeholder="Montant (€)"
@@ -466,25 +498,30 @@ const BettingMatches = () => {
                           onChange={(e) =>
                             setBetAmounts({ ...betAmounts, [match.id]: Number(e.target.value) })
                           }
+                          className="flex-1"
                         />
-                        <Button
-                          variant={betTeams[match.id] === 1 ? "default" : "outline"}
-                          onClick={() => {
-                            setBetTeams({ ...betTeams, [match.id]: 1 });
-                            handlePlaceBet(match.id);
-                          }}
-                        >
-                          Équipe 1
-                        </Button>
-                        <Button
-                          variant={betTeams[match.id] === 2 ? "destructive" : "outline"}
-                          onClick={() => {
-                            setBetTeams({ ...betTeams, [match.id]: 2 });
-                            handlePlaceBet(match.id);
-                          }}
-                        >
-                          Équipe 2
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button
+                            variant={betTeams[match.id] === 1 ? "default" : "outline"}
+                            onClick={() => {
+                              setBetTeams({ ...betTeams, [match.id]: 1 });
+                              handlePlaceBet(match.id);
+                            }}
+                            className="flex-1"
+                          >
+                            Équipe 1
+                          </Button>
+                          <Button
+                            variant={betTeams[match.id] === 2 ? "destructive" : "outline"}
+                            onClick={() => {
+                              setBetTeams({ ...betTeams, [match.id]: 2 });
+                              handlePlaceBet(match.id);
+                            }}
+                            className="flex-1"
+                          >
+                            Équipe 2
+                          </Button>
+                        </div>
                       </div>
                     )}
 
@@ -510,7 +547,7 @@ const BettingMatches = () => {
                           <DialogHeader>
                             <DialogTitle>Entrer les scores</DialogTitle>
                           </DialogHeader>
-                          <div className="grid grid-cols-2 gap-4 mt-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
                             <div>
                               <label className="text-sm text-primary">Score Équipe 1</label>
                               <Input

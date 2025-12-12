@@ -28,7 +28,14 @@ export const ELO_RANKS: EloRank[] = [
 ];
 
 export function getEloRank(elo: number): EloRank {
-  return ELO_RANKS.find(rank => elo >= rank.minElo && elo <= rank.maxElo) || ELO_RANKS[0];
+  // ✅ VALIDATION: S'assurer que l'ELO est valide
+  if (typeof elo !== 'number' || isNaN(elo) || elo < 0) {
+    return ELO_RANKS[0]; // Bronze par défaut
+  }
+  
+  // ✅ LOGIQUE: Trouver le rang approprié
+  const rank = ELO_RANKS.find(r => elo >= r.minElo && elo <= r.maxElo);
+  return rank || ELO_RANKS[ELO_RANKS.length - 1]; // Challenger si au-dessus du maximum
 }
 
 // ============================
@@ -163,6 +170,19 @@ export async function createMatchForBetting(
   createdBy: string
 ): Promise<string> {
   try {
+    // ✅ VALIDATION: Vérifier les paramètres
+    if (!Array.isArray(team1PlayerIds) || !Array.isArray(team2PlayerIds)) {
+      throw new Error("Équipes invalides");
+    }
+    
+    if (team1PlayerIds.length === 0 || team2PlayerIds.length === 0) {
+      throw new Error("Les équipes doivent contenir au moins un joueur");
+    }
+    
+    if (team1PlayerIds.length > 2 || team2PlayerIds.length > 2) {
+      throw new Error("Maximum 2 joueurs par équipe");
+    }
+    
     const duplicates = team1PlayerIds.filter(id => team2PlayerIds.includes(id));
     if (duplicates.length > 0) {
       throw new Error("Un joueur ne peut pas être dans les deux équipes");
@@ -176,6 +196,13 @@ export async function createMatchForBetting(
     }
 
     const users = usersSnapshot.val();
+    
+    // ✅ VALIDATION: Vérifier que tous les joueurs existent
+    const allPlayerIds = [...team1PlayerIds, ...team2PlayerIds];
+    const missingPlayers = allPlayerIds.filter(id => !users[id]);
+    if (missingPlayers.length > 0) {
+      throw new Error(`Joueur(s) introuvable(s): ${missingPlayers.join(", ")}`);
+    }
     
     const team1Names = team1PlayerIds.map(id => users[id]?.username || "Unknown");
     const team2Names = team2PlayerIds.map(id => users[id]?.username || "Unknown");
@@ -217,6 +244,20 @@ export async function placeBet(
   teamBet: 1 | 2
 ): Promise<void> {
   try {
+    // ✅ VALIDATION ANTI-TRICHE: Vérifier les paramètres
+    if (!matchId || !userId || !username) {
+      throw new Error("Paramètres invalides");
+    }
+    
+    if (amount <= 0 || amount > 10000) {
+      throw new Error("Le montant doit être entre 1€ et 10000€");
+    }
+    
+    if (teamBet !== 1 && teamBet !== 2) {
+      throw new Error("Équipe invalide");
+    }
+
+    // ✅ AMÉLIORATION: Vérifier d'abord le match et l'utilisateur avant les transactions
     const matchRef = ref(database, `bettingMatches/${matchId}`);
     const matchSnapshot = await get(matchRef);
     
@@ -226,55 +267,96 @@ export async function placeBet(
 
     const match = matchSnapshot.val() as MatchWithBetting;
     
+    // ✅ VALIDATION ANTI-TRICHE: Vérifier le statut
     if (match.status !== "open") {
       throw new Error("Les paris sont fermés pour ce match");
     }
+    
+    // ✅ VALIDATION ANTI-TRICHE: Empêcher de parier sur son propre match
+    if (match.createdBy === userId) {
+      throw new Error("Vous ne pouvez pas parier sur votre propre match");
+    }
 
+    // ✅ AMÉLIORATION: Transaction sur l'utilisateur d'abord
     const userRef = ref(database, `users/${userId}`);
     
     await runTransaction(userRef, (userData) => {
       if (!userData) {
         throw new Error("Utilisateur introuvable");
       }
+      
+      // ✅ VALIDATION ANTI-TRICHE: Vérifier que l'utilisateur n'est pas banni
+      if (userData.banned === true) {
+        throw new Error("Compte banni");
+      }
 
       const currentFortune = userData.fortune || 0;
       const oldBet = match.bets?.[userId];
       const availableFortune = oldBet ? currentFortune + oldBet.amount : currentFortune;
 
+      // ✅ VALIDATION ANTI-TRICHE: Vérifier les fonds
       if (availableFortune < amount) {
         throw new Error("Vous n'avez pas assez d'argent");
+      }
+      
+      // ✅ VALIDATION ANTI-TRICHE: Limite de fortune
+      if (currentFortune < 0 || currentFortune > 1000000) {
+        throw new Error("Fortune invalide");
       }
 
       userData.fortune = availableFortune - amount;
       return userData;
     });
 
-    const updates: { [path: string]: any } = {};
-    
-    updates[`bettingMatches/${matchId}/bets/${userId}`] = {
-      userId,
-      username,
-      amount,
-      teamBet,
-      timestamp: Date.now(),
-    };
-
-    let newTotal1 = match.totalBetsTeam1 || 0;
-    let newTotal2 = match.totalBetsTeam2 || 0;
-
-    const oldBet = match.bets?.[userId];
-    if (oldBet) {
-      if (oldBet.teamBet === 1) newTotal1 -= oldBet.amount;
-      else newTotal2 -= oldBet.amount;
-    }
-
-    if (teamBet === 1) newTotal1 += amount;
-    else newTotal2 += amount;
-
-    updates[`bettingMatches/${matchId}/totalBetsTeam1`] = newTotal1;
-    updates[`bettingMatches/${matchId}/totalBetsTeam2`] = newTotal2;
-
-    await update(ref(database), updates);
+    // ✅ AMÉLIORATION: Utiliser une transaction pour éviter les race conditions sur le match
+    await runTransaction(matchRef, (matchData) => {
+      if (!matchData) {
+        throw new Error("Match introuvable");
+      }
+      
+      // ✅ VALIDATION: Vérifier que le match est toujours ouvert
+      if (matchData.status !== "open") {
+        throw new Error("Les paris sont fermés pour ce match");
+      }
+      
+      const currentBets = matchData.bets || {};
+      const oldBet = currentBets[userId];
+      
+      let newTotal1 = matchData.totalBetsTeam1 || 0;
+      let newTotal2 = matchData.totalBetsTeam2 || 0;
+      
+      // Retirer l'ancien pari s'il existe
+      if (oldBet) {
+        if (oldBet.teamBet === 1) {
+          newTotal1 -= oldBet.amount;
+        } else {
+          newTotal2 -= oldBet.amount;
+        }
+      }
+      
+      // Ajouter le nouveau pari
+      if (teamBet === 1) {
+        newTotal1 += amount;
+      } else {
+        newTotal2 += amount;
+      }
+      
+      // Mettre à jour les données du match
+      matchData.bets = {
+        ...currentBets,
+        [userId]: {
+          userId,
+          username,
+          amount,
+          teamBet,
+          timestamp: Date.now(),
+        }
+      };
+      matchData.totalBetsTeam1 = newTotal1;
+      matchData.totalBetsTeam2 = newTotal2;
+      
+      return matchData;
+    });
   } catch (error) {
     console.error("Erreur lors du placement du pari:", error);
     throw error;
@@ -283,10 +365,23 @@ export async function placeBet(
 
 export async function startMatch(matchId: string): Promise<void> {
   try {
-    const updates: { [path: string]: any } = {};
-    updates[`bettingMatches/${matchId}/status`] = "playing";
-    updates[`bettingMatches/${matchId}/startedAt`] = Date.now();
-    await update(ref(database), updates);
+    const matchRef = ref(database, `bettingMatches/${matchId}`);
+    
+    // ✅ AMÉLIORATION: Utiliser une transaction pour éviter les race conditions
+    await runTransaction(matchRef, (matchData) => {
+      if (!matchData) {
+        throw new Error("Match introuvable");
+      }
+      
+      if (matchData.status !== "open") {
+        throw new Error("Le match n'est pas en attente de démarrage");
+      }
+      
+      matchData.status = "playing";
+      matchData.startedAt = Date.now();
+      
+      return matchData;
+    });
   } catch (error) {
     console.error("Erreur lors du démarrage du match:", error);
     throw error;
@@ -306,11 +401,22 @@ function calculateNewElo(
   opponentElo: number,
   won: boolean
 ): number {
+  // ✅ VALIDATION: Vérifier que les ELO sont valides
+  if (typeof playerElo !== 'number' || isNaN(playerElo) || playerElo < 0) {
+    playerElo = 1000; // Valeur par défaut
+  }
+  if (typeof opponentElo !== 'number' || isNaN(opponentElo) || opponentElo < 0) {
+    opponentElo = 1000; // Valeur par défaut
+  }
+  
   const kFactor = getKFactor(playerElo);
   const expectedScore = 1 / (1 + Math.pow(10, (opponentElo - playerElo) / 400));
   const actualScore = won ? 1 : 0;
   const eloChange = Math.round(kFactor * (actualScore - expectedScore));
-  return playerElo + eloChange;
+  const newElo = playerElo + eloChange;
+  
+  // ✅ VALIDATION: S'assurer que le nouvel ELO ne devient pas négatif
+  return Math.max(0, newElo);
 }
 
 export async function finishMatch(
@@ -319,6 +425,19 @@ export async function finishMatch(
   score2: number
 ): Promise<{ eloUpdates: EloUpdate[]; winnings: { [userId: string]: number } }> {
   try {
+    // ✅ VALIDATION: Vérifier que les scores sont valides
+    if (typeof score1 !== 'number' || typeof score2 !== 'number') {
+      throw new Error("Scores invalides");
+    }
+    
+    if (!Number.isInteger(score1) || !Number.isInteger(score2)) {
+      throw new Error("Les scores doivent être des nombres entiers");
+    }
+    
+    if (score1 < 0 || score2 < 0 || score1 > 100 || score2 > 100) {
+      throw new Error("Les scores doivent être entre 0 et 100");
+    }
+    
     if (score1 === score2) {
       throw new Error("Le score ne peut pas être égal");
     }
@@ -343,8 +462,20 @@ export async function finishMatch(
       throw new Error("Aucun utilisateur trouvé");
     }
 
-    const users = usersSnapshot.val();
     const matchType = match.matchType;
+    
+    // ✅ OPTIMISATION: Charger seulement les joueurs nécessaires
+    const allPlayerIds = [...match.team1, ...match.team2];
+    const playersById = await getPlayersByIds(allPlayerIds);
+    
+    // Vérifier que tous les joueurs existent
+    const missingPlayers = allPlayerIds.filter(id => !playersById[id]);
+    if (missingPlayers.length > 0) {
+      throw new Error(`Joueur(s) introuvable(s): ${missingPlayers.join(", ")}`);
+    }
+    
+    // Convertir en format attendu pour compatibilité
+    const users = playersById;
     
     // Récupérer les ELO appropriés selon le type de match
     const getPlayerElo = (userId: string): number => {
@@ -361,31 +492,43 @@ export async function finishMatch(
       }
     };
     
-    const team1Players = match.team1.map(id => ({
-      id,
-      username: users[id]?.username || "Unknown",
-      eloRating: getPlayerElo(id),
-      wins: users[id]?.[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-      losses: users[id]?.[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-    }));
+    const team1Players = match.team1.map(id => {
+      const user = users[id];
+      if (!user) {
+        throw new Error(`Joueur ${id} introuvable`);
+      }
+      return {
+        id,
+        username: user.username || "Unknown",
+        eloRating: getPlayerElo(id),
+        wins: user[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+        losses: user[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+      };
+    });
 
-    const team2Players = match.team2.map(id => ({
-      id,
-      username: users[id]?.username || "Unknown",
-      eloRating: getPlayerElo(id),
-      wins: users[id]?.[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-      losses: users[id]?.[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-    }));
+    const team2Players = match.team2.map(id => {
+      const user = users[id];
+      if (!user) {
+        throw new Error(`Joueur ${id} introuvable`);
+      }
+      return {
+        id,
+        username: user.username || "Unknown",
+        eloRating: getPlayerElo(id),
+        wins: user[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+        losses: user[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+      };
+    });
 
     const team1AvgElo = team1Players.reduce((sum, p) => sum + p.eloRating, 0) / team1Players.length;
     const team2AvgElo = team2Players.reduce((sum, p) => sum + p.eloRating, 0) / team2Players.length;
     const team1Won = score1 > score2;
     
     const eloUpdates: EloUpdate[] = [];
-    const updates: { [path: string]: any } = {};
+    const updates: { [path: string]: unknown } = {};
 
     // Mettre à jour les ELO spécifiques + global
-    const updatePlayerElo = (player: any, opponentAvgElo: number, won: boolean) => {
+    const updatePlayerElo = (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
       const newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
       const eloChange = newElo - player.eloRating;
       
@@ -393,13 +536,34 @@ export async function finishMatch(
       const eloField = matchType === "1v1" ? "elo1v1" : matchType === "2v2" ? "elo2v2" : "eloGlobal";
       updates[`users/${player.id}/${eloField}`] = newElo;
       
-      // Mise à jour ELO global (moyenne pondérée)
+      // ✅ AMÉLIORATION: Mise à jour ELO global (moyenne pondérée uniquement des modes joués)
       const user = users[player.id];
-      const elo1v1 = matchType === "1v1" ? newElo : (user?.elo1v1 || 1000);
-      const elo2v2 = matchType === "2v2" ? newElo : (user?.elo2v2 || 1000);
-      const eloMixed = matchType === "mixed" ? newElo : (user?.eloGlobal || 1000);
+      if (!user) {
+        throw new Error(`Utilisateur ${player.id} introuvable lors de la mise à jour ELO`);
+      }
       
-      const newGlobalElo = Math.round((elo1v1 + elo2v2 + eloMixed) / 3);
+      const elo1v1 = matchType === "1v1" ? newElo : (user.elo1v1 || 1000);
+      const elo2v2 = matchType === "2v2" ? newElo : (user.elo2v2 || 1000);
+      const eloMixed = matchType === "mixed" ? newElo : (user.eloGlobal || 1000);
+      
+      // ✅ LOGIQUE AMÉLIORÉE: Calculer la moyenne uniquement des modes qui ont été joués
+      // Si un joueur n'a jamais joué en 1v1, on ne l'inclut pas dans la moyenne
+      const elosToAverage: number[] = [];
+      if (matchType === "1v1" || user.elo1v1 !== undefined) {
+        elosToAverage.push(elo1v1);
+      }
+      if (matchType === "2v2" || user.elo2v2 !== undefined) {
+        elosToAverage.push(elo2v2);
+      }
+      if (matchType === "mixed" || user.eloGlobal !== undefined) {
+        elosToAverage.push(eloMixed);
+      }
+      
+      // Si aucun mode n'a été joué, utiliser la valeur par défaut
+      const newGlobalElo = elosToAverage.length > 0 
+        ? Math.round(elosToAverage.reduce((sum, elo) => sum + elo, 0) / elosToAverage.length)
+        : 1000;
+      
       updates[`users/${player.id}/eloGlobal`] = newGlobalElo;
       
       // Stats
@@ -433,27 +597,48 @@ export async function finishMatch(
     
     const winnings: { [userId: string]: number } = {};
 
-    if (match.bets && winningPot > 0) {
-      for (const bet of Object.values(match.bets)) {
-        if (bet.teamBet === winningTeam) {
-          const winnerShare = bet.amount / winningPot;
-          const profitFromLosers = winnerShare * losingPot;
-          const totalWinning = bet.amount + profitFromLosers;
-          
-          winnings[bet.userId] = Math.round(totalWinning);
-          
-          const userRef = ref(database, `users/${bet.userId}`);
-          const userSnapshot = await get(userRef);
-          
-          if (userSnapshot.exists()) {
-            const userData = userSnapshot.val();
-            const currentFortune = userData.fortune || 0;
-            const currentBettingGains = userData.bettingGains || 0;
-            const netProfit = Math.round(profitFromLosers);
+    // ✅ AMÉLIORATION: Distribution des gains avec gestion des cas limites
+    if (match.bets && Object.keys(match.bets).length > 0) {
+      if (winningPot > 0) {
+        // Cas normal : des paris sur l'équipe gagnante
+        for (const bet of Object.values(match.bets)) {
+          if (bet.teamBet === winningTeam) {
+            const winnerShare = bet.amount / winningPot;
+            const profitFromLosers = winnerShare * losingPot;
+            const totalWinning = bet.amount + profitFromLosers;
             
-            updates[`users/${bet.userId}/fortune`] = currentFortune + winnings[bet.userId];
-            updates[`users/${bet.userId}/bettingGains`] = currentBettingGains + netProfit;
-            updates[`users/${bet.userId}/totalEarned`] = (userData.totalEarned || 0) + netProfit;
+            winnings[bet.userId] = Math.round(totalWinning);
+            
+            const userRef = ref(database, `users/${bet.userId}`);
+            const userSnapshot = await get(userRef);
+            
+            if (userSnapshot.exists()) {
+              const userData = userSnapshot.val();
+              const currentFortune = userData.fortune || 0;
+              const currentBettingGains = userData.bettingGains || 0;
+              const netProfit = Math.round(profitFromLosers);
+              
+              updates[`users/${bet.userId}/fortune`] = currentFortune + winnings[bet.userId];
+              updates[`users/${bet.userId}/bettingGains`] = currentBettingGains + netProfit;
+              updates[`users/${bet.userId}/totalEarned`] = (userData.totalEarned || 0) + netProfit;
+            }
+          }
+        }
+      } else {
+        // ✅ CAS LIMITE: Personne n'a parié sur l'équipe gagnante
+        // Rembourser tous les paris de l'équipe perdante
+        for (const bet of Object.values(match.bets)) {
+          if (bet.teamBet !== winningTeam) {
+            const userRef = ref(database, `users/${bet.userId}`);
+            const userSnapshot = await get(userRef);
+            
+            if (userSnapshot.exists()) {
+              const userData = userSnapshot.val();
+              const currentFortune = userData.fortune || 0;
+              
+              // Rembourser la mise
+              updates[`users/${bet.userId}/fortune`] = currentFortune + bet.amount;
+            }
           }
         }
       }
@@ -485,6 +670,9 @@ export async function finishMatch(
 
     await update(ref(database), updates);
 
+    // ✅ OPTIMISATION: Invalider le cache après un match pour refléter les nouveaux ELO
+    invalidatePlayerCache();
+
     return { eloUpdates, winnings };
   } catch (error) {
     console.error("Erreur lors de la finalisation du match:", error);
@@ -504,25 +692,68 @@ export async function recordMatch(
   recordedBy: string
 ): Promise<{ eloUpdates: EloUpdate[] }> {
   try {
+    // ✅ VALIDATION ANTI-TRICHE: Vérifier les paramètres
+    if (!recordedBy) {
+      throw new Error("Utilisateur non authentifié");
+    }
+    
+    if (!Array.isArray(team1PlayerIds) || !Array.isArray(team2PlayerIds)) {
+      throw new Error("Équipes invalides");
+    }
+    
+    if (team1PlayerIds.length === 0 || team2PlayerIds.length === 0) {
+      throw new Error("Les équipes doivent contenir au moins un joueur");
+    }
+    
+    if (team1PlayerIds.length > 2 || team2PlayerIds.length > 2) {
+      throw new Error("Maximum 2 joueurs par équipe");
+    }
+    
+    // ✅ VALIDATION ANTI-TRICHE: Scores valides
+    if (typeof score1 !== 'number' || typeof score2 !== 'number') {
+      throw new Error("Scores invalides");
+    }
+    
+    // ✅ VALIDATION: Vérifier que les scores sont des entiers
+    if (!Number.isInteger(score1) || !Number.isInteger(score2)) {
+      throw new Error("Les scores doivent être des nombres entiers");
+    }
+    
+    if (score1 < 0 || score2 < 0 || score1 > 100 || score2 > 100) {
+      throw new Error("Les scores doivent être entre 0 et 100");
+    }
+    
     if (score1 === score2) {
       throw new Error("Le score ne peut pas être égal");
     }
 
+    // ✅ VALIDATION ANTI-TRICHE: Pas de doublons
     const duplicates = team1PlayerIds.filter(id => team2PlayerIds.includes(id));
     if (duplicates.length > 0) {
       throw new Error("Un joueur ne peut pas être dans les deux équipes");
     }
+    
+    // ✅ VALIDATION ANTI-TRICHE: Pas de doublons dans la même équipe
+    const team1Duplicates = team1PlayerIds.filter((id, index) => team1PlayerIds.indexOf(id) !== index);
+    const team2Duplicates = team2PlayerIds.filter((id, index) => team2PlayerIds.indexOf(id) !== index);
+    if (team1Duplicates.length > 0 || team2Duplicates.length > 0) {
+      throw new Error("Un joueur ne peut pas être deux fois dans la même équipe");
+    }
 
     const matchType = determineMatchType(team1PlayerIds.length, team2PlayerIds.length);
 
-    const usersRef = ref(database, "users");
-    const usersSnapshot = await get(usersRef);
+    // ✅ OPTIMISATION: Charger seulement les joueurs nécessaires au lieu de tous
+    const allPlayerIds = [...team1PlayerIds, ...team2PlayerIds];
+    const playersById = await getPlayersByIds(allPlayerIds);
     
-    if (!usersSnapshot.exists()) {
-      throw new Error("Aucun utilisateur trouvé");
+    // Vérifier que tous les joueurs existent
+    const missingPlayers = allPlayerIds.filter(id => !playersById[id]);
+    if (missingPlayers.length > 0) {
+      throw new Error(`Joueur(s) introuvable(s): ${missingPlayers.join(", ")}`);
     }
-
-    const users = usersSnapshot.val();
+    
+    // Convertir en format attendu pour compatibilité
+    const users = playersById;
     
     const getPlayerElo = (userId: string): number => {
       const user = users[userId];
@@ -538,42 +769,74 @@ export async function recordMatch(
       }
     };
     
-    const team1Players = team1PlayerIds.map(id => ({
-      id,
-      username: users[id]?.username || "Unknown",
-      eloRating: getPlayerElo(id),
-      wins: users[id]?.[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-      losses: users[id]?.[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-    }));
+    const team1Players = team1PlayerIds.map(id => {
+      const user = users[id];
+      if (!user) {
+        throw new Error(`Joueur ${id} introuvable`);
+      }
+      return {
+        id,
+        username: user.username || "Unknown",
+        eloRating: getPlayerElo(id),
+        wins: user[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+        losses: user[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+      };
+    });
 
-    const team2Players = team2PlayerIds.map(id => ({
-      id,
-      username: users[id]?.username || "Unknown",
-      eloRating: getPlayerElo(id),
-      wins: users[id]?.[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-      losses: users[id]?.[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
-    }));
+    const team2Players = team2PlayerIds.map(id => {
+      const user = users[id];
+      if (!user) {
+        throw new Error(`Joueur ${id} introuvable`);
+      }
+      return {
+        id,
+        username: user.username || "Unknown",
+        eloRating: getPlayerElo(id),
+        wins: user[`wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+        losses: user[`losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`] || 0,
+      };
+    });
 
     const team1AvgElo = team1Players.reduce((sum, p) => sum + p.eloRating, 0) / team1Players.length;
     const team2AvgElo = team2Players.reduce((sum, p) => sum + p.eloRating, 0) / team2Players.length;
     const team1Won = score1 > score2;
     
     const eloUpdates: EloUpdate[] = [];
-    const updates: { [path: string]: any } = {};
+    const updates: { [path: string]: unknown } = {};
 
-    const updatePlayerElo = (player: any, opponentAvgElo: number, won: boolean) => {
+    const updatePlayerElo = (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
       const newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
       const eloChange = newElo - player.eloRating;
       
       const eloField = matchType === "1v1" ? "elo1v1" : matchType === "2v2" ? "elo2v2" : "eloGlobal";
       updates[`users/${player.id}/${eloField}`] = newElo;
       
+      // ✅ AMÉLIORATION: Mise à jour ELO global (moyenne pondérée uniquement des modes joués)
       const user = users[player.id];
-      const elo1v1 = matchType === "1v1" ? newElo : (user?.elo1v1 || 1000);
-      const elo2v2 = matchType === "2v2" ? newElo : (user?.elo2v2 || 1000);
-      const eloMixed = matchType === "mixed" ? newElo : (user?.eloGlobal || 1000);
+      if (!user) {
+        throw new Error(`Utilisateur ${player.id} introuvable lors de la mise à jour ELO`);
+      }
       
-      const newGlobalElo = Math.round((elo1v1 + elo2v2 + eloMixed) / 3);
+      const elo1v1 = matchType === "1v1" ? newElo : (user.elo1v1 || 1000);
+      const elo2v2 = matchType === "2v2" ? newElo : (user.elo2v2 || 1000);
+      const eloMixed = matchType === "mixed" ? newElo : (user.eloGlobal || 1000);
+      
+      // ✅ LOGIQUE AMÉLIORÉE: Calculer la moyenne uniquement des modes qui ont été joués
+      const elosToAverage: number[] = [];
+      if (matchType === "1v1" || user.elo1v1 !== undefined) {
+        elosToAverage.push(elo1v1);
+      }
+      if (matchType === "2v2" || user.elo2v2 !== undefined) {
+        elosToAverage.push(elo2v2);
+      }
+      if (matchType === "mixed" || user.eloGlobal !== undefined) {
+        elosToAverage.push(eloMixed);
+      }
+      
+      const newGlobalElo = elosToAverage.length > 0 
+        ? Math.round(elosToAverage.reduce((sum, elo) => sum + elo, 0) / elosToAverage.length)
+        : 1000;
+      
       updates[`users/${player.id}/eloGlobal`] = newGlobalElo;
       
       const winsField = `wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`;
@@ -622,6 +885,9 @@ export async function recordMatch(
 
     await update(ref(database), updates);
 
+    // ✅ OPTIMISATION: Invalider le cache après un match pour refléter les nouveaux ELO
+    invalidatePlayerCache();
+
     return { eloUpdates };
   } catch (error) {
     console.error("Erreur lors de l'enregistrement du match:", error);
@@ -669,29 +935,118 @@ export async function getOpenMatches(): Promise<MatchWithBetting[]> {
   }
 }
 
-export async function getAvailablePlayers(): Promise<Array<{
+// ✅ OPTIMISATION: Cache simple pour réduire les requêtes Firebase
+const playerCache = new Map<string, { data: Array<{
+  id: string;
+  username: string;
+  elo1v1: number;
+  elo2v2: number;
+  eloGlobal: number;
+}>, timestamp: number }>();
+const CACHE_TTL = 30000; // 30 secondes
+
+export async function getAvailablePlayers(useCache = true): Promise<Array<{
   id: string;
   username: string;
   elo1v1: number;
   elo2v2: number;
   eloGlobal: number;
 }>> {
+  const cacheKey = 'all_players';
+  const cached = playerCache.get(cacheKey);
+  
+  // ✅ Retourner le cache si valide
+  if (useCache && cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    return cached.data;
+  }
+  
   try {
     const usersRef = ref(database, "users");
     const snapshot = await get(usersRef);
     
-    if (!snapshot.exists()) return [];
+    if (!snapshot.exists()) {
+      // ✅ Même si vide, mettre en cache pour éviter les requêtes répétées
+      const emptyResult: Array<{
+        id: string;
+        username: string;
+        elo1v1: number;
+        elo2v2: number;
+        eloGlobal: number;
+      }> = [];
+      playerCache.set(cacheKey, { data: emptyResult, timestamp: Date.now() });
+      return emptyResult;
+    }
     
     const users = snapshot.val();
-    return Object.entries(users).map(([id, data]: [string, any]) => ({
+    const result = Object.entries(users).map(([id, data]: [string, any]) => ({
       id,
       username: data.username || "Unknown",
       elo1v1: data.elo1v1 || 1000,
       elo2v2: data.elo2v2 || 1000,
       eloGlobal: data.eloGlobal || 1000,
     }));
+    
+    // ✅ Mettre en cache
+    playerCache.set(cacheKey, { data: result, timestamp: Date.now() });
+    return result;
   } catch (error) {
     console.error("Erreur lors de la récupération des joueurs:", error);
+    // ✅ En cas d'erreur, retourner le cache si disponible
+    if (cached) {
+      return cached.data;
+    }
     return [];
   }
+}
+
+// ✅ NOUVEAU: Fonction pour invalider le cache (appelée après un match)
+export function invalidatePlayerCache(): void {
+  playerCache.clear();
+}
+
+// ✅ NOUVEAU: Charger seulement les joueurs nécessaires (optimisation)
+export async function getPlayersByIds(playerIds: string[]): Promise<Record<string, {
+  id: string;
+  username: string;
+  elo1v1: number;
+  elo2v2: number;
+  eloGlobal: number;
+  wins1v1?: number;
+  losses1v1?: number;
+  wins2v2?: number;
+  losses2v2?: number;
+  winsMixed?: number;
+  lossesMixed?: number;
+}>> {
+  const players: Record<string, any> = {};
+  
+  // ✅ Charger en parallèle pour meilleure performance
+  await Promise.all(
+    playerIds.map(async (id) => {
+      try {
+        const userRef = ref(database, `users/${id}`);
+        const snapshot = await get(userRef);
+        if (snapshot.exists()) {
+          const userData = snapshot.val();
+          players[id] = {
+            id,
+            username: userData.username || "Unknown",
+            elo1v1: userData.elo1v1 || 1000,
+            elo2v2: userData.elo2v2 || 1000,
+            eloGlobal: userData.eloGlobal || 1000,
+            wins1v1: userData.wins1v1 || 0,
+            losses1v1: userData.losses1v1 || 0,
+            wins2v2: userData.wins2v2 || 0,
+            losses2v2: userData.losses2v2 || 0,
+            winsMixed: userData.winsMixed || 0,
+            lossesMixed: userData.lossesMixed || 0,
+          };
+        }
+      } catch (error) {
+        console.error(`Erreur chargement joueur ${id}:`, error);
+      }
+    })
+  );
+  
+  return players;
 }

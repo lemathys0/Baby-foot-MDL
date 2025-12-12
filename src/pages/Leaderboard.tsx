@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Trophy, Filter, Loader2, Swords, Users, Globe } from "lucide-react";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { getEloRank } from "@/lib/firebaseMatch";
 import { ref, onValue, get } from "firebase/database";
 import { database } from "@/lib/firebase";
+import { LeaderboardSkeleton } from "@/components/SkeletonLoader";
 
 interface PlayerStats {
   id: string;
@@ -28,6 +29,8 @@ const Leaderboard = () => {
   const [players, setPlayers] = useState<PlayerStats[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedMode, setSelectedMode] = useState<"global" | "1v1" | "2v2">("global");
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   useEffect(() => {
     const usersRef = ref(database, "users");
@@ -70,17 +73,19 @@ const Leaderboard = () => {
     return () => unsubscribe();
   }, []);
 
-  const getSortedPlayers = () => {
+  // ✅ OPTIMISATION: Memoization du tri des joueurs
+  const sortedPlayers = useMemo(() => {
     const sortKey = selectedMode === "1v1" ? "elo1v1" : selectedMode === "2v2" ? "elo2v2" : "eloGlobal";
     return [...players].sort((a, b) => b[sortKey] - a[sortKey]);
-  };
+  }, [players, selectedMode]);
 
-  const getWinRate = (player: PlayerStats, mode: "1v1" | "2v2" | "mixed") => {
+  // ✅ OPTIMISATION: Memoization du calcul du win rate
+  const getWinRate = useCallback((player: PlayerStats, mode: "1v1" | "2v2" | "mixed") => {
     const wins = mode === "1v1" ? player.wins1v1 : mode === "2v2" ? player.wins2v2 : player.winsMixed;
     const losses = mode === "1v1" ? player.losses1v1 : mode === "2v2" ? player.losses2v2 : player.lossesMixed;
     const total = wins + losses;
     return total === 0 ? 0 : Math.round((wins / total) * 100);
-  };
+  }, []);
 
   const getRankBadge = (elo: number) => {
     const rank = getEloRank(elo);
@@ -99,8 +104,8 @@ const Leaderboard = () => {
     );
   };
 
-  // Calculate rank distribution from real data
-  const getRankDistribution = () => {
+  // ✅ OPTIMISATION: Memoization de la distribution des rangs
+  const rankDistribution = useMemo(() => {
     const distribution = {
       Bronze: 0,
       Argent: 0,
@@ -127,9 +132,10 @@ const Leaderboard = () => {
       name,
       percentage: Math.round((count / total) * 100),
     }));
-  };
+  }, [players, selectedMode]);
 
-  const LeaderboardItem = ({ 
+  // ✅ OPTIMISATION: Memoization du composant pour éviter les re-renders inutiles
+  const LeaderboardItem = React.memo(({ 
     player, 
     rank, 
     index 
@@ -198,20 +204,44 @@ const Leaderboard = () => {
         </div>
       </motion.div>
     );
-  };
+  }, (prevProps, nextProps) => {
+    // ✅ OPTIMISATION: Ne re-render que si les données importantes changent
+    return (
+      prevProps.player.id === nextProps.player.id &&
+      prevProps.player.elo1v1 === nextProps.player.elo1v1 &&
+      prevProps.player.elo2v2 === nextProps.player.elo2v2 &&
+      prevProps.player.eloGlobal === nextProps.player.eloGlobal &&
+      prevProps.rank === nextProps.rank
+    );
+  });
 
-  const sortedPlayers = getSortedPlayers();
-  const topPlayers = sortedPlayers.slice(0, 3);
-  const rankDistribution = getRankDistribution();
+  // ✅ OPTIMISATION: Memoization des top 3 joueurs
+  const topPlayers = useMemo(() => sortedPlayers.slice(0, 3), [sortedPlayers]);
+
+  // ✅ OPTIMISATION: Pagination
+  const paginatedPlayers = useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return sortedPlayers.slice(startIndex, startIndex + itemsPerPage);
+  }, [sortedPlayers, currentPage]);
+
+  const totalPages = useMemo(() => {
+    return Math.ceil(sortedPlayers.length / itemsPerPage);
+  }, [sortedPlayers.length]);
 
   if (isLoading) {
     return (
       <AppLayout>
-        <div className="flex min-h-screen items-center justify-center">
-          <div className="text-center">
-            <Loader2 className="mx-auto mb-4 h-8 w-8 animate-spin text-primary" />
-            <p className="text-muted-foreground">Chargement du classement...</p>
+        <div className="space-y-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="rounded-xl bg-rarity-gold/20 p-3">
+              <Trophy className="h-6 w-6 text-rarity-gold" />
+            </div>
+            <div>
+              <div className="h-7 w-32 bg-muted animate-pulse rounded mb-2" />
+              <div className="h-4 w-24 bg-muted animate-pulse rounded" />
+            </div>
           </div>
+          <LeaderboardSkeleton />
         </div>
       </AppLayout>
     );
@@ -236,7 +266,7 @@ const Leaderboard = () => {
         </div>
 
         {/* Mode Selector */}
-        <Tabs value={selectedMode} onValueChange={(v) => setSelectedMode(v as any)} className="w-full">
+        <Tabs value={selectedMode} onValueChange={(v) => setSelectedMode(v as "global" | "1v1" | "2v2")} className="w-full">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="global" className="gap-2">
               <Globe className="h-4 w-4" />
@@ -365,15 +395,18 @@ const Leaderboard = () => {
 
       {/* Full Leaderboard */}
       <div className="space-y-3">
-        {sortedPlayers.length > 0 ? (
-          sortedPlayers.map((player, index) => (
-            <LeaderboardItem
-              key={player.id}
-              player={player}
-              rank={index + 1}
-              index={index}
-            />
-          ))
+        {paginatedPlayers.length > 0 ? (
+          paginatedPlayers.map((player, index) => {
+            const globalRank = (currentPage - 1) * itemsPerPage + index + 1;
+            return (
+              <LeaderboardItem
+                key={player.id}
+                player={player}
+                rank={globalRank}
+                index={index}
+              />
+            );
+          })
         ) : (
           <Card>
             <CardContent className="p-8 text-center">
@@ -382,6 +415,31 @@ const Leaderboard = () => {
           </Card>
         )}
       </div>
+
+      {/* ✅ Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="mt-6 flex items-center justify-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+          >
+            Précédent
+          </Button>
+          <span className="text-sm text-muted-foreground">
+            Page {currentPage} sur {totalPages}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+          >
+            Suivant
+          </Button>
+        </div>
+      )}
     </AppLayout>
   );
 };

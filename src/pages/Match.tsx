@@ -21,6 +21,7 @@ const MatchPage = () => {
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
   const [isJoining, setIsJoining] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
+  const { elo1v1 = 1000, elo2v2 = 1000, eloGlobal = 1000 } = userProfile;
 
   // Subscribe to queue updates
   useEffect(() => {
@@ -62,10 +63,12 @@ const MatchPage = () => {
     setIsJoining(true);
     try {
       await joinMatchQueue(
-        user.uid,
-        userProfile.username,
-        userProfile.eloRating || 1000
-      );
+          user.uid,
+          userProfile.username,
+          elo1v1,      // ELO 1v1
+          elo2v2,      // ELO 2v2
+          eloGlobal    // ELO Global
+        );
       
       toast({
         title: "File d'attente",

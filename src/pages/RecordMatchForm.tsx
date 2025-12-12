@@ -39,8 +39,14 @@ const RecordMatchForm = () => {
     const loadPlayers = async () => {
       setIsLoadingPlayers(true);
       try {
-        const players = await getAvailablePlayers(); 
-        setAvailablePlayers(players);
+        const playersData = await getAvailablePlayers(); 
+        // Mapper les données pour utiliser elo2v2 comme eloRating pour les matchs 2v2
+        const mappedPlayers: Player[] = playersData.map(p => ({
+          id: p.id,
+          username: p.username,
+          eloRating: p.elo2v2, // Utiliser elo2v2 pour les matchs 2v2
+        }));
+        setAvailablePlayers(mappedPlayers);
       } catch (error) {
         toast({
             title: "Erreur",
@@ -84,10 +90,11 @@ const RecordMatchForm = () => {
         return;
     }
 
-    if (score1 < 0 || score2 < 0) {
+    // ✅ VALIDATION: Les scores doivent être >= 0 (0 est valide pour un match)
+    if (score1 < 0 || score2 < 0 || !Number.isInteger(score1) || !Number.isInteger(score2)) {
         toast({ 
           title: "Erreur", 
-          description: "Les scores doivent être positifs.", 
+          description: "Les scores doivent être des nombres entiers positifs.", 
           variant: "destructive" 
         });
         return;
@@ -204,23 +211,23 @@ const RecordMatchForm = () => {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-6 flex items-center justify-between"
+        className="mb-4 sm:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3"
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
           <Button 
             variant="ghost" 
             size="icon"
             onClick={() => navigate('/match')}
             className="rounded-xl"
           >
-            <ArrowLeft className="h-5 w-5" />
+            <ArrowLeft className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
-          <div className="rounded-xl bg-primary/20 p-3">
-            <Zap className="h-6 w-6 text-primary" />
+          <div className="rounded-xl bg-primary/20 p-2 sm:p-3">
+            <Zap className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Enregistrer un Match</h1>
-            <p className="text-sm text-muted-foreground">Match 2v2</p>
+            <h1 className="text-lg sm:text-2xl font-bold text-foreground">Enregistrer un Match</h1>
+            <p className="text-xs sm:text-sm text-muted-foreground">Match 2v2</p>
           </div>
         </div>
       </motion.div>
@@ -233,8 +240,8 @@ const RecordMatchForm = () => {
             animate={{ opacity: 1, y: 0 }}
           >
             <Card className="border-primary/30">
-              <CardContent className="p-4">
-                <div className="grid grid-cols-3 gap-4 items-center">
+              <CardContent className="p-3 sm:p-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4 items-center">
                   {/* Équipe 1 */}
                   <div className="text-center">
                     <p className="text-sm text-muted-foreground mb-2">Équipe 1</p>
@@ -254,7 +261,7 @@ const RecordMatchForm = () => {
 
                   {/* VS */}
                   <div className="text-center">
-                    <div className="text-2xl font-bold text-primary">VS</div>
+                    <div className="text-lg sm:text-2xl font-bold text-primary">VS</div>
                   </div>
 
                   {/* Équipe 2 */}
@@ -294,9 +301,9 @@ const RecordMatchForm = () => {
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
                 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                   {/* Équipe 1 */}
-                  <div className="space-y-3 p-3 rounded-lg border border-primary/20 bg-primary/5">
+                  <div className="space-y-2 sm:space-y-3 p-2 sm:p-3 rounded-lg border border-primary/20 bg-primary/5">
                     <label className="font-semibold text-lg flex items-center justify-between text-primary">
                       <span className="flex items-center">
                         <Users className="h-4 w-4 mr-1" /> Équipe 1
@@ -330,7 +337,7 @@ const RecordMatchForm = () => {
                   </div>
 
                   {/* Équipe 2 */}
-                  <div className="space-y-3 p-3 rounded-lg border border-red-500/20 bg-red-500/5">
+                  <div className="space-y-2 sm:space-y-3 p-2 sm:p-3 rounded-lg border border-red-500/20 bg-red-500/5">
                     <label className="font-semibold text-lg flex items-center justify-between text-red-500">
                       <span className="flex items-center">
                         <Users className="h-4 w-4 mr-1" /> Équipe 2

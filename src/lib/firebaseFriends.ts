@@ -109,7 +109,7 @@ export async function acceptFriendRequest(requestId: string): Promise<void> {
     const fromUser = fromSnapshot.val();
     const toUser = toSnapshot.val();
 
-    const updates: { [path: string]: any } = {};
+    const updates: { [path: string]: unknown } = {};
 
     // Ajouter comme amis mutuels
     updates[`friends/${request.from}/${request.to}`] = {
@@ -157,7 +157,7 @@ export async function declineFriendRequest(requestId: string): Promise<void> {
  */
 export async function removeFriend(userId: string, friendId: string): Promise<void> {
   try {
-    const updates: { [path: string]: any } = {};
+    const updates: { [path: string]: null } = {};
     updates[`friends/${userId}/${friendId}`] = null;
     updates[`friends/${friendId}/${userId}`] = null;
     
@@ -182,21 +182,21 @@ export async function getFriends(userId: string): Promise<Friend[]> {
     const friends: Friend[] = [];
 
     for (const [friendId, data] of Object.entries(friendsData)) {
-      const friendData = data as any;
+      const friendData = data as Record<string, unknown>;
       
       // Récupérer le statut en ligne
       const statusRef = ref(database, `userStatus/${friendId}`);
       const statusSnapshot = await get(statusRef);
-      const status = statusSnapshot.exists() ? statusSnapshot.val().status : "offline";
-      const lastSeen = statusSnapshot.exists() ? statusSnapshot.val().lastSeen : null;
+      const status = statusSnapshot.exists() ? (statusSnapshot.val() as { status: string }).status : "offline";
+      const lastSeen = statusSnapshot.exists() ? (statusSnapshot.val() as { lastSeen: number }).lastSeen : null;
 
       friends.push({
         id: friendId,
-        username: friendData.username,
-        eloRating: friendData.eloRating,
-        avatar: friendData.avatar,
-        status,
-        lastSeen,
+        username: (friendData.username as string) || "Unknown",
+        eloRating: (friendData.eloRating as number) || 1000,
+        avatar: friendData.avatar as string | undefined,
+        status: status as "online" | "offline",
+        lastSeen: lastSeen as number | undefined,
       });
     }
 
@@ -250,20 +250,20 @@ export function onFriendsUpdate(userId: string, callback: (friends: Friend[]) =>
     const friends: Friend[] = [];
 
     for (const [friendId, data] of Object.entries(friendsData)) {
-      const friendData = data as any;
+      const friendData = data as Record<string, unknown>;
       
       const statusRef = ref(database, `userStatus/${friendId}`);
       const statusSnapshot = await get(statusRef);
-      const status = statusSnapshot.exists() ? statusSnapshot.val().status : "offline";
-      const lastSeen = statusSnapshot.exists() ? statusSnapshot.val().lastSeen : null;
+      const status = statusSnapshot.exists() ? (statusSnapshot.val() as { status: string }).status : "offline";
+      const lastSeen = statusSnapshot.exists() ? (statusSnapshot.val() as { lastSeen: number }).lastSeen : null;
 
       friends.push({
         id: friendId,
-        username: friendData.username,
-        eloRating: friendData.eloRating,
-        avatar: friendData.avatar,
-        status,
-        lastSeen,
+        username: (friendData.username as string) || "Unknown",
+        eloRating: (friendData.eloRating as number) || 1000,
+        avatar: friendData.avatar as string | undefined,
+        status: status as "online" | "offline",
+        lastSeen: lastSeen as number | undefined,
       });
     }
 
@@ -433,18 +433,19 @@ export async function searchUsers(searchTerm: string, currentUserId: string): Pr
     const results: Friend[] = [];
 
     for (const [userId, data] of Object.entries(users)) {
-      const userData = data as any;
+      const userData = data as Record<string, unknown>;
       
       // Exclure l'utilisateur actuel
       if (userId === currentUserId) continue;
       
       // Filtrer par nom
-      if (userData.username.toLowerCase().includes(searchTerm.toLowerCase())) {
+      const username = (userData.username as string) || "";
+      if (username.toLowerCase().includes(searchTerm.toLowerCase())) {
         results.push({
           id: userId,
-          username: userData.username,
-          eloRating: userData.eloRating || 1000,
-          avatar: userData.avatar,
+          username,
+          eloRating: (userData.eloRating as number) || 1000,
+          avatar: userData.avatar as string | undefined,
           status: "offline",
         });
       }

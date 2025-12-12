@@ -814,14 +814,19 @@ export async function contributeToClub(
     // On utilise l'opérateur ?. pour éviter un crash si l'utilisateur n'est pas dans la liste
     const currentContributions = club.members?.[userId]?.contributions || 0;
 
-    const updates: { [path: string]: any } = {};
+    // ✅ VALIDATION: Vérifier que l'utilisateur est membre du club
+    if (!club.members || !club.members[userId]) {
+      throw new Error("Vous devez être membre du club pour contribuer");
+    }
+    
+    const updates: { [path: string]: unknown } = {};
     
     // Déduire la fortune
     updates[`users/${userId}/fortune`] = currentFortune - amount;
     // Ajouter à la trésorerie
     updates[`clubs/${clubId}/treasury`] = (club.treasury || 0) + amount;
     
-    // Mettre à jour les contributions du membre (créera l'entrée si elle n'existe pas)
+    // Mettre à jour les contributions du membre
     updates[`clubs/${clubId}/members/${userId}/contributions`] = currentContributions + amount;
 
     await update(ref(database), updates);

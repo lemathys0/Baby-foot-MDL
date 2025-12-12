@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import Index from "./pages/Index";
 import Leaderboard from "./pages/Leaderboard";
 import Match from "./pages/Match";
@@ -25,12 +26,13 @@ import RecordMatchForm from "./pages/RecordMatchForm"; // ✅ AJOUT
 const queryClient = new QueryClient();
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <TooltipProvider>
-      <BrowserRouter>
-        <AuthProvider>
-          <ThemeProvider>
-            <Routes>
+  <ErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <TooltipProvider>
+        <BrowserRouter>
+          <AuthProvider>
+            <ThemeProvider>
+              <Routes>
               {/* Public routes */}
               <Route path="/auth" element={<Auth />} />
               <Route path="/reset-password/:token" element={<ResetPassword />} />
@@ -155,6 +157,7 @@ const App = () => (
       <Sonner />
     </TooltipProvider>
   </QueryClientProvider>
+  </ErrorBoundary>
 );
 
 export default App;

@@ -67,16 +67,18 @@ const Clubs = () => {
   const [selectedColor, setSelectedColor] = useState(CLUB_COLORS[0]);
   const [contributionAmount, setContributionAmount] = useState("");
 
-  // Load user's club data with real-time sync
+  // ✅ CORRECTION: Load user's club data with real-time sync
   useEffect(() => {
     if (!user) {
       setIsLoadingMyClub(false);
       return;
     }
 
+    let unsubscribeClub: (() => void) | null = null;
+
     const userRef = ref(database, `users/${user.uid}`);
     
-    const unsubscribeUser = onValue(userRef, async (snapshot) => {
+    const unsubscribeUser = onValue(userRef, (snapshot) => {
       if (!snapshot.exists()) {
         setIsLoadingMyClub(false);
         return;
@@ -85,14 +87,20 @@ const Clubs = () => {
       const userData = snapshot.val();
       setFortune(userData.fortune || 0);
       
+      // ✅ CORRECTION: Nettoyer l'ancien abonnement au club avant d'en créer un nouveau
+      if (unsubscribeClub) {
+        unsubscribeClub();
+        unsubscribeClub = null;
+      }
+      
       if (userData.clubId) {
         // Utiliser onClubDataUpdate pour les mises à jour en temps réel
-        const unsubscribeClub = onClubDataUpdate(userData.clubId, (clubData) => {
+        unsubscribeClub = onClubDataUpdate(userData.clubId, (clubData) => {
           if (clubData) {
             setMyClub(clubData);
             
-            // Convertir l'objet members en tableau
-            const membersArray: ClubMember[] = clubData.members 
+            // ✅ VALIDATION: Vérifier que members existe avant Object.values
+            const membersArray: ClubMember[] = clubData.members && typeof clubData.members === 'object'
               ? Object.values(clubData.members)
               : [];
             setMembers(membersArray);
@@ -102,11 +110,6 @@ const Clubs = () => {
           }
           setIsLoadingMyClub(false);
         });
-
-        // Retourner la fonction de nettoyage pour le club
-        return () => {
-          unsubscribeClub();
-        };
       } else {
         setMyClub(null);
         setMembers([]);
@@ -117,7 +120,13 @@ const Clubs = () => {
       setIsLoadingMyClub(false);
     });
 
-    return () => unsubscribeUser();
+    // ✅ CORRECTION: Cleanup correct
+    return () => {
+      unsubscribeUser();
+      if (unsubscribeClub) {
+        unsubscribeClub();
+      }
+    };
   }, [user]);
 
   // Load available clubs for joining

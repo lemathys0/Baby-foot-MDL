@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useDebounce } from "@/hooks/useDebounce";
 import { motion } from "framer-motion";
 import { Settings, LogOut, UserPlus, Bell, Shield, Users, Search, Loader2, X, Check, ShoppingBag, AlertTriangle, Info, TrendingUp, Eye, Sparkles, Package } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -246,8 +247,13 @@ const Profile = () => {
   const [agentData, setAgentData] = useState<{ 
     fortune: number; 
     bettingGains: number;
-    equipped: any;
-    inventory: any;
+    equipped: {
+      avatar: string;
+      theme: string;
+      banner: string;
+      effect: string;
+    };
+    inventory: Record<string, unknown>;
   }>({ 
     fortune: 0, 
     bettingGains: 0,
@@ -336,18 +342,20 @@ const Profile = () => {
     loadSettings();
   }, [user]);
 
+  // ✅ OPTIMISATION: Debounce de la recherche
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
+
   useEffect(() => {
-    if (!user || searchTerm.length < 2) {
+    if (!user || debouncedSearchTerm.length < 2) {
       setSearchResults([]);
       return;
     }
     const search = async () => {
-      const results = await searchUsers(searchTerm, user.uid);
+      const results = await searchUsers(debouncedSearchTerm, user.uid);
       setSearchResults(results);
     };
-    const debounce = setTimeout(search, 300);
-    return () => clearTimeout(debounce);
-  }, [searchTerm, user]);
+    search();
+  }, [debouncedSearchTerm, user]);
 
   const handleLogout = async () => {
     try {

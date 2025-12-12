@@ -14,6 +14,7 @@ import {
   getRarityCategory 
 } from "@/lib/firebaseCards";
 import { cn } from "@/lib/utils";
+import { LazyImage } from "@/components/common/LazyImage";
 
 type Rarity = "bronze" | "silver" | "gold" | "espoir" | "icone" | "future-star" | "god" | "creator" | "unknown";
 type AllCardData = CardData & { ownedCount: number; owned: boolean };
@@ -73,7 +74,12 @@ function PlayerCardSimple({
       <div className="relative aspect-[3/4] overflow-hidden rounded-lg bg-background/50 backdrop-blur-sm">
         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-transparent to-background/80">
           {image ? (
-            <img src={image} alt="Card" className="h-full w-full object-cover" loading="lazy" />
+            <LazyImage 
+              src={image} 
+              alt="Card" 
+              className="h-full w-full object-cover"
+              placeholder={<span className="text-4xl">⚽</span>}
+            />
           ) : (
             <span className="text-4xl">⚽</span>
           )}
