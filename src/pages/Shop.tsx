@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShoppingBag, Sparkles, Check, Lock, TrendingUp, Star, Zap, Gift, Search, Filter, X } from "lucide-react";
+import { ShoppingBag, Sparkles, Check, Lock, TrendingUp, Star, Zap, Gift, Search, Filter, X, Award } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -55,6 +55,7 @@ const categoryConfig = {
   avatar: { label: "Avatars", icon: Star },
   theme: { label: "Thèmes", icon: Sparkles },
   banner: { label: "Bannières", icon: TrendingUp },
+  title: { label: "Titres", icon: Award },
   effect: { label: "Effets", icon: Zap },
   lootbox: { label: "Lootboxes", icon: Gift }
 };
@@ -69,6 +70,7 @@ const ShopPage = () => {
     avatar: "",
     theme: "",
     banner: "",
+    title: "",
     effect: "",
   });
   const [loading, setLoading] = useState(false);
@@ -93,6 +95,7 @@ const ShopPage = () => {
             avatar: data.avatar || data.equippedAvatar || "",
             theme: data.theme || data.equippedTheme || "",
             banner: data.banner || data.equippedBanner || "",
+            title: data.title || data.equippedTitle || "",
             effect: data.effect || data.equippedEffect || "",
           });
         }
@@ -192,6 +195,7 @@ const ShopPage = () => {
           avatar: data.avatar || "",
           theme: data.theme || "",
           banner: data.banner || "",
+          title: data.title || "",
           effect: data.effect || "",
         });
       }
@@ -505,8 +509,22 @@ const ShopPage = () => {
                             className="w-20 h-20 rounded-lg shadow-xl border-2 border-white/20"
                             style={{ backgroundColor: item.preview }}
                           />
+                        ) : item.type === "banner" && item.preview ? (
+                          <div 
+                            className="w-full h-16 rounded-lg shadow-xl border-2 border-white/20 relative overflow-hidden"
+                            style={{ background: item.preview }}
+                          >
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="text-2xl">{item.icon}</span>
+                            </div>
+                          </div>
+                        ) : item.type === "title" && item.preview ? (
+                          <div className="flex flex-col items-center gap-1">
+                            <span className="text-4xl">{item.icon}</span>
+                            <span className="text-xs font-bold text-primary">{item.preview}</span>
+                          </div>
                         ) : (
-                          <span>{item.icon || item.preview || "🎁"}</span>
+                          <span>{item.icon || "🎁"}</span>
                         )}
                       </div>
                       <CardTitle className="text-center text-lg">

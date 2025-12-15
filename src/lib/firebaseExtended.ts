@@ -1,7 +1,7 @@
-// 🔐 src/lib/firebaseExtended.ts
+// 📁 src/lib/firebaseExtended.ts
 // ============================
 // Fonctions pour Clubs, Badges, Shop, Historique, Paramètres et Amis
-// ✅ FIX: Correction complète du système
+// ✅ FIX: Correction complète du système avec Bannières + Titres
 
 import { ref, get, set, update, push, onValue, runTransaction } from "firebase/database";
 import { database } from "./firebase";
@@ -117,7 +117,125 @@ export async function joinClub(
   }
 }
 
+export async function contributeToClub(
+  userId: string,
+  clubId: string,
+  amount: number
+): Promise<void> {
+  try {
+    const userRef = ref(database, `users/${userId}`);
+    const userSnapshot = await get(userRef);
 
+    if (!userSnapshot.exists()) {
+       throw new Error("Utilisateur introuvable");
+    }
+
+    const userData = userSnapshot.val();
+    const currentFortune = userData.fortune || 0;
+
+    if (currentFortune < amount) {
+      throw new Error("Fonds insuffisants");
+    }
+
+    const clubRef = ref(database, `clubs/${clubId}`);
+    const clubSnapshot = await get(clubRef);
+    
+    if (!clubSnapshot.exists()) {
+      throw new Error("Club introuvable");
+    }
+    
+    const club = clubSnapshot.val();
+
+    if (!club.members || !club.members[userId]) {
+      throw new Error("Vous devez être membre du club pour contribuer");
+    }
+    
+    const currentContributions = club.members?.[userId]?.contributions || 0;
+    
+    const updates: { [path: string]: unknown } = {};
+    updates[`users/${userId}/fortune`] = currentFortune - amount;
+    updates[`clubs/${clubId}/treasury`] = (club.treasury || 0) + amount;
+    updates[`clubs/${clubId}/members/${userId}/contributions`] = currentContributions + amount;
+
+    await update(ref(database), updates);
+    
+    console.log(`✅ Contribution de ${amount}€ ajoutée au club ${clubId} par ${userId}`);
+
+  } catch (error) {
+    console.error("Erreur contribution club:", error);
+    throw error;
+  }
+}
+
+export async function buyClubBonus(
+  clubId: string,
+  bonusId: keyof Club['bonuses'],
+  cost: number
+): Promise<void> {
+  try {
+    const clubRef = ref(database, `clubs/${clubId}`);
+    const clubSnapshot = await get(clubRef);
+    if (!clubSnapshot.exists()) {
+      throw new Error("Club introuvable.");
+    }
+    const club = clubSnapshot.val() as Club;
+
+    if ((club.treasury || 0) < cost) {
+      throw new Error("Trésorerie insuffisante pour acheter ce bonus.");
+    }
+    if (club.bonuses[bonusId]) {
+      throw new Error("Ce bonus est déjà actif.");
+    }
+
+    const updates: { [path: string]: any } = {};
+    updates[`treasury`] = (club.treasury || 0) - cost;
+    updates[`bonuses/${bonusId}`] = true;
+
+    await update(clubRef, updates);
+    console.log(`✅ Bonus ${bonusId} acheté pour le club ${clubId}`);
+  } catch (error) {
+    console.error("Erreur achat bonus club:", error);
+    throw error;
+  }
+}
+
+export async function leaveClub(clubId: string, userId: string): Promise<void> {
+  try {
+    const updates: { [path: string]: any } = {};
+    updates[`clubs/${clubId}/members/${userId}`] = null;
+    updates[`users/${userId}/clubId`] = null;
+
+    await update(ref(database), updates);
+    console.log(`✅ ${userId} a quitté le club ${clubId}`);
+  } catch (error) {
+    console.error("Erreur quitter club:", error);
+    throw new Error("Impossible de quitter le club.");
+  }
+}
+
+export function onClubDataUpdate(
+  clubId: string,
+  callback: (club: Club | null) => void
+): () => void {
+  const clubRef = ref(database, `clubs/${clubId}`);
+
+  const unsubscribe = onValue(clubRef, (snapshot) => {
+    if (snapshot.exists()) {
+      const clubData = snapshot.val() as Club;
+      if (!clubData.members) {
+         clubData.members = {};
+      }
+      callback(clubData);
+    } else {
+      callback(null);
+    }
+  }, (error) => {
+    console.error("Erreur d'écoute des données du club:", error);
+    callback(null);
+  });
+
+  return unsubscribe;
+}
 
 // ============================
 // 💸 HISTORIQUE DE FORTUNE
@@ -469,7 +587,7 @@ export interface LootboxReward {
   itemId: string;
   itemName: string;
   rarity: "common" | "rare" | "epic" | "legendary" | "mythic";
-  type: "avatar" | "theme" | "banner" | "effect";
+  type: "avatar" | "theme" | "banner" | "title" | "effect";
   isNew: boolean;
 }
 
@@ -773,141 +891,6 @@ export function checkItemOwnership(inventory: any, itemId: string, itemType: str
   return false;
 }
 
-// Deuxième fonction : Contribution au club (Reconstruite et sans la restriction de membre)
-// ✅ CORRECT - Sans le paramètre database
-export async function contributeToClub(
-  userId: string,
-  clubId: string,
-  amount: number
-): Promise<void> {
-  try {
-    // Récupérer l'utilisateur
-    const userRef = ref(database, `users/${userId}`);
-    const userSnapshot = await get(userRef);
-
-    if (!userSnapshot.exists()) {
-       throw new Error("Utilisateur introuvable");
-    }
-
-    const userData = userSnapshot.val();
-    const currentFortune = userData.fortune || 0;
-
-    if (currentFortune < amount) {
-      throw new Error("Fonds insuffisants");
-    }
-
-    // Vérifier que le club existe
-    const clubRef = ref(database, `clubs/${clubId}`);
-    const clubSnapshot = await get(clubRef);
-    
-    if (!clubSnapshot.exists()) {
-      throw new Error("Club introuvable");
-    }
-    
-    const club = clubSnapshot.val();
-    
-    // --- ZONE MODIFIÉE ---
-    // Le bloc de vérification "if (!club.members || !club.members[userId])" a été supprimé.
-    // L'utilisateur peut maintenant contribuer même s'il n'est pas explicitement dans la liste 'members'.
-    // ---------------------
-
-    // On utilise l'opérateur ?. pour éviter un crash si l'utilisateur n'est pas dans la liste
-    const currentContributions = club.members?.[userId]?.contributions || 0;
-
-    // ✅ VALIDATION: Vérifier que l'utilisateur est membre du club
-    if (!club.members || !club.members[userId]) {
-      throw new Error("Vous devez être membre du club pour contribuer");
-    }
-    
-    const updates: { [path: string]: unknown } = {};
-    
-    // Déduire la fortune
-    updates[`users/${userId}/fortune`] = currentFortune - amount;
-    // Ajouter à la trésorerie
-    updates[`clubs/${clubId}/treasury`] = (club.treasury || 0) + amount;
-    
-    // Mettre à jour les contributions du membre
-    updates[`clubs/${clubId}/members/${userId}/contributions`] = currentContributions + amount;
-
-    await update(ref(database), updates);
-    
-    console.log(`✅ Contribution de ${amount}€ ajoutée au club ${clubId} par ${userId}`);
-
-  } catch (error) {
-    console.error("Erreur contribution club:", error);
-    throw error;
-  }
-}
-export async function buyClubBonus(
-  clubId: string,
-  bonusId: keyof Club['bonuses'],
-  cost: number
-): Promise<void> {
-  try {
-    const clubRef = ref(database, `clubs/${clubId}`);
-    const clubSnapshot = await get(clubRef);
-    if (!clubSnapshot.exists()) {
-      throw new Error("Club introuvable.");
-    }
-    const club = clubSnapshot.val() as Club;
-
-    if ((club.treasury || 0) < cost) {
-      throw new Error("Trésorerie insuffisante pour acheter ce bonus.");
-    }
-    if (club.bonuses[bonusId]) {
-      throw new Error("Ce bonus est déjà actif.");
-    }
-
-    const updates: { [path: string]: any } = {};
-    updates[`treasury`] = (club.treasury || 0) - cost;
-    updates[`bonuses/${bonusId}`] = true;
-
-    await update(clubRef, updates);
-    console.log(`✅ Bonus ${bonusId} acheté pour le club ${clubId}`);
-  } catch (error) {
-    console.error("Erreur achat bonus club:", error);
-    throw error;
-  }
-}
-
-export async function leaveClub(clubId: string, userId: string): Promise<void> {
-  try {
-    const updates: { [path: string]: any } = {};
-    updates[`clubs/${clubId}/members/${userId}`] = null;
-    updates[`users/${userId}/clubId`] = null;
-
-    await update(ref(database), updates);
-    console.log(`✅ ${userId} a quitté le club ${clubId}`);
-  } catch (error) {
-    console.error("Erreur quitter club:", error);
-    throw new Error("Impossible de quitter le club.");
-  }
-}
-
-export function onClubDataUpdate(
-  clubId: string,
-  callback: (club: Club | null) => void
-): () => void {
-  const clubRef = ref(database, `clubs/${clubId}`);
-
-  const unsubscribe = onValue(clubRef, (snapshot) => {
-    if (snapshot.exists()) {
-      const clubData = snapshot.val() as Club;
-      if (!clubData.members) {
-         clubData.members = {};
-      }
-      callback(clubData);
-    } else {
-      callback(null);
-    }
-  }, (error) => {
-    console.error("Erreur d'écoute des données du club:", error);
-    callback(null);
-  });
-
-  return unsubscribe;
-}
-
 // ============================
 // 🏅 BADGES / ACHIEVEMENTS
 // ============================
@@ -950,7 +933,7 @@ export async function checkAchievements(userId: string): Promise<void> {
 // ============================
 
 export type ItemRarity = "common" | "rare" | "epic" | "legendary" | "mythic";
-export type ItemType = "avatar" | "theme" | "banner" | "effect" | "lootbox" | "badge" | "title";
+export type ItemType = "avatar" | "theme" | "banner" | "title" | "effect" | "lootbox" | "badge";
 
 export interface ShopItem {
   id: string;
@@ -1008,23 +991,23 @@ const THEMES: ShopItem[] = [
   { id: "theme_cosmic", name: "Cosmique", description: "Galaxies infinies", type: "theme", price: 1000, rarity: "mythic", preview: "#4c1d95", icon: "✨" },
 ];
 
-// 🎌 BANNIÈRES (15 items)
+// 🎌 BANNIÈRES (15 items) - Arrière-plan visuel du profil
 const BANNERS: ShopItem[] = [
-  { id: "banner_default", name: "Bannière Simple", description: "Bannière de départ", type: "banner", price: 0, rarity: "common", icon: "📋" },
-  { id: "banner_stars", name: "Ciel Étoilé", description: "Étoiles scintillantes", type: "banner", price: 150, rarity: "rare", icon: "⭐" },
-  { id: "banner_fire", name: "Flammes", description: "Bannière enflammée", type: "banner", price: 200, rarity: "rare", icon: "🔥" },
-  { id: "banner_lightning", name: "Éclair", description: "Bannière électrique", type: "banner", price: 250, rarity: "epic", icon: "⚡" },
-  { id: "banner_rainbow", name: "Arc-en-ciel", description: "Bannière multicolore", type: "banner", price: 180, rarity: "rare", icon: "🌈" },
-  { id: "banner_galaxy", name: "Galaxie", description: "Bannière cosmique", type: "banner", price: 400, rarity: "legendary", icon: "🌌" },
-  { id: "banner_diamond", name: "Diamant", description: "Luxe cristallin", type: "banner", price: 500, rarity: "legendary", icon: "💎" },
-  { id: "banner_sakura", name: "Fleurs de Cerisier", description: "Élégance japonaise", type: "banner", price: 280, rarity: "epic", icon: "🌸" },
-  { id: "banner_dragon", name: "Dragon Doré", description: "Mythique", type: "banner", price: 450, rarity: "legendary", icon: "🐲" },
-  { id: "banner_ocean", name: "Vagues Océaniques", description: "Aquatique", type: "banner", price: 220, rarity: "epic", icon: "🌊" },
-  { id: "banner_aurora", name: "Aurore Boréale", description: "Lumineuse magique", type: "banner", price: 350, rarity: "epic", icon: "🌌" },
-  { id: "banner_blood", name: "Lune Sanglante", description: "Nocturne mystique", type: "banner", price: 380, rarity: "epic", icon: "🌙" },
-  { id: "banner_gold", name: "Or Impérial", description: "Richesse absolue", type: "banner", price: 600, rarity: "legendary", icon: "🏆" },
-  { id: "banner_phoenix", name: "Phénix Céleste", description: "Renaissance éternelle", type: "banner", price: 700, rarity: "mythic", icon: "🔥🦅" },
-  { id: "banner_infinity", name: "Infini", description: "Au-delà du temps", type: "banner", price: 900, rarity: "mythic", icon: "♾️" },
+  { id: "banner_default", name: "Bannière Simple", description: "Bannière de départ", type: "banner", price: 0, rarity: "common", icon: "📋", preview: "linear-gradient(135deg, #1e293b 0%, #334155 100%)" },
+  { id: "banner_stars", name: "Ciel Étoilé", description: "Étoiles scintillantes", type: "banner", price: 150, rarity: "rare", icon: "⭐", preview: "linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #312e81 100%)" },
+  { id: "banner_fire", name: "Flammes", description: "Bannière enflammée", type: "banner", price: 200, rarity: "rare", icon: "🔥", preview: "linear-gradient(135deg, #7f1d1d 0%, #dc2626 50%, #ea580c 100%)" },
+  { id: "banner_lightning", name: "Éclair", description: "Bannière électrique", type: "banner", price: 250, rarity: "epic", icon: "⚡", preview: "linear-gradient(135deg, #581c87 0%, #7c3aed 50%, #06b6d4 100%)" },
+  { id: "banner_rainbow", name: "Arc-en-ciel", description: "Bannière multicolore", type: "banner", price: 180, rarity: "rare", icon: "🌈", preview: "linear-gradient(135deg, #dc2626 0%, #ea580c 20%, #eab308 40%, #22c55e 60%, #3b82f6 80%, #a855f7 100%)" },
+  { id: "banner_galaxy", name: "Galaxie", description: "Bannière cosmique", type: "banner", price: 400, rarity: "legendary", icon: "🌌", preview: "linear-gradient(135deg, #0c4a6e 0%, #7c3aed 50%, #ec4899 100%)" },
+  { id: "banner_diamond", name: "Diamant", description: "Luxe cristallin", type: "banner", price: 500, rarity: "legendary", icon: "💎", preview: "linear-gradient(135deg, #0c4a6e 0%, #06b6d4 50%, #e0f2fe 100%)" },
+  { id: "banner_sakura", name: "Fleurs de Cerisier", description: "Élégance japonaise", type: "banner", price: 280, rarity: "epic", icon: "🌸", preview: "linear-gradient(135deg, #9f1239 0%, #ec4899 50%, #fce7f3 100%)" },
+  { id: "banner_dragon", name: "Dragon Doré", description: "Mythique", type: "banner", price: 450, rarity: "legendary", icon: "🐲", preview: "linear-gradient(135deg, #78350f 0%, #f59e0b 50%, #fef3c7 100%)" },
+  { id: "banner_ocean", name: "Vagues Océaniques", description: "Aquatique", type: "banner", price: 220, rarity: "epic", icon: "🌊", preview: "linear-gradient(135deg, #0c4a6e 0%, #0891b2 50%, #06b6d4 100%)" },
+  { id: "banner_aurora", name: "Aurore Boréale", description: "Lumineuse magique", type: "banner", price: 350, rarity: "epic", icon: "🌌", preview: "linear-gradient(135deg, #064e3b 0%, #10b981 33%, #06b6d4 66%, #a855f7 100%)" },
+  { id: "banner_blood", name: "Lune Sanglante", description: "Nocturne mystique", type: "banner", price: 380, rarity: "epic", icon: "🌙", preview: "linear-gradient(135deg, #450a0a 0%, #7f1d1d 50%, #dc2626 100%)" },
+  { id: "banner_gold", name: "Or Impérial", description: "Richesse absolue", type: "banner", price: 600, rarity: "legendary", icon: "🏆", preview: "linear-gradient(135deg, #713f12 0%, #f59e0b 50%, #fef3c7 100%)" },
+  { id: "banner_phoenix", name: "Phénix Céleste", description: "Renaissance éternelle", type: "banner", price: 700, rarity: "mythic", icon: "🔥🦅", preview: "linear-gradient(135deg, #dc2626 0%, #f97316 25%, #facc15 50%, #f97316 75%, #dc2626 100%)" },
+  { id: "banner_infinity", name: "Infini", description: "Au-delà du temps", type: "banner", price: 900, rarity: "mythic", icon: "♾️", preview: "linear-gradient(135deg, #1e1b4b 0%, #5b21b6 25%, #ec4899 50%, #5b21b6 75%, #1e1b4b 100%)" },
 ];
 
 // ✨ EFFETS (20 items)
@@ -1060,18 +1043,18 @@ const LOOTBOXES: ShopItem[] = [
   { id: "lootbox_mythic", name: "Coffre Mythique", description: "Cartes légendaires garanties", type: "lootbox", price: 2000, rarity: "mythic", icon: "✨" },
 ];
 
-// 📜 TITRES (10 items)
+// 📜 TITRES (10 items) - Titre affiché sous le pseudo
 const TITLES: ShopItem[] = [
-  { id: "title_newbie", name: "Débutant", description: "Titre de départ", type: "title", price: 0, rarity: "common", icon: "🆕" },
-  { id: "title_veteran", name: "Vétéran", description: "Joueur expérimenté", type: "title", price: 300, rarity: "rare", icon: "🎖️" },
-  { id: "title_champion", name: "Champion", description: "Gagnant de tournois", type: "title", price: 500, rarity: "epic", icon: "🏆" },
-  { id: "title_legend", name: "Légende", description: "Légende vivante", type: "title", price: 800, rarity: "legendary", icon: "⭐" },
-  { id: "title_millionaire", name: "Millionnaire", description: "Fortune immense", type: "title", price: 1500, rarity: "legendary", icon: "💰" },
-  { id: "title_godlike", name: "Divin", description: "Pouvoir suprême", type: "title", price: 2000, rarity: "mythic", icon: "👑" },
-  { id: "title_strategist", name: "Stratège", description: "Maître tacticien", type: "title", price: 600, rarity: "epic", icon: "🧠" },
-  { id: "title_gambler", name: "Parieur Fou", description: "Risque tout", type: "title", price: 400, rarity: "rare", icon: "🎲" },
-  { id: "title_collector", name: "Collectionneur", description: "Toutes les cartes", type: "title", price: 1000, rarity: "legendary", icon: "🃏" },
-  { id: "title_immortal", name: "Immortel", description: "Au-delà du temps", type: "title", price: 3000, rarity: "mythic", icon: "♾️" },
+  { id: "title_newbie", name: "Débutant", description: "Titre de départ", type: "title", price: 0, rarity: "common", icon: "🆕", preview: "Débutant" },
+  { id: "title_veteran", name: "Vétéran", description: "Joueur expérimenté", type: "title", price: 300, rarity: "rare", icon: "🎖️", preview: "Vétéran" },
+  { id: "title_champion", name: "Champion", description: "Gagnant de tournois", type: "title", price: 500, rarity: "epic", icon: "🏆", preview: "Champion" },
+  { id: "title_legend", name: "Légende", description: "Légende vivante", type: "title", price: 800, rarity: "legendary", icon: "⭐", preview: "Légende" },
+  { id: "title_millionaire", name: "Millionnaire", description: "Fortune immense", type: "title", price: 1500, rarity: "legendary", icon: "💰", preview: "Millionnaire" },
+  { id: "title_godlike", name: "Divin", description: "Pouvoir suprême", type: "title", price: 2000, rarity: "mythic", icon: "👑", preview: "Divin" },
+  { id: "title_strategist", name: "Stratège", description: "Maître tacticien", type: "title", price: 600, rarity: "epic", icon: "🧠", preview: "Stratège" },
+  { id: "title_gambler", name: "Parieur Fou", description: "Risque tout", type: "title", price: 400, rarity: "rare", icon: "🎲", preview: "Parieur Fou" },
+  { id: "title_collector", name: "Collectionneur", description: "Toutes les cartes", type: "title", price: 1000, rarity: "legendary", icon: "🃏", preview: "Collectionneur" },
+  { id: "title_immortal", name: "Immortel", description: "Au-delà du temps", type: "title", price: 3000, rarity: "mythic", icon: "♾️", preview: "Immortel" },
 ];
 
 // 🎯 EXPORT DE TOUS LES ITEMS
@@ -1177,4 +1160,3 @@ export async function equipItem(
     throw error;
   }
 }
-
