@@ -11,7 +11,7 @@ interface FortuneHistoryCardProps {
 
 export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
   const [history, setHistory] = useState<FortuneHistory[]>([]);
-  const [period, setPeriod] = useState<7 | 30>(30);
+  const [period, setPeriod] = useState<1 | 7 | 30>(7);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -103,10 +103,10 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
           
           {/* Sélecteur de période */}
           <div className="flex gap-2">
-            {[7, 30].map((p) => (
+            {[1, 7, 30].map((p) => (
               <button
                 key={p}
-                onClick={() => setPeriod(p as 7 | 30)}
+                onClick={() => setPeriod(p as 1 | 7 | 30)}
                 className={`px-3 py-1 rounded-lg text-sm font-medium transition-colors ${
                   period === p
                     ? "bg-primary text-primary-foreground"

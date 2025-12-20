@@ -6,7 +6,8 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { notifyBetResult } from "@/lib/firebaseNotifications";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { ref, get } from "firebase/database";
@@ -30,6 +31,7 @@ const BettingMatches = () => {
   const navigate = useNavigate();
   const [matches, setMatches] = useState<MatchWithBetting[]>([]);
   const [availablePlayers, setAvailablePlayers] = useState<Player[]>([]);
+  const [playerSearch, setPlayerSearch] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   
@@ -149,11 +151,10 @@ const BettingMatches = () => {
     }
   };
 
-  const handlePlaceBet = async (matchId: string) => {
+  const handlePlaceBet = async (matchId: string, team: 1 | 2) => {
     if (!user || !userProfile) return;
     
     const amount = betAmounts[matchId];
-    const team = betTeams[matchId];
     
     if (!amount || amount <= 0 || !team) {
       toast({
@@ -230,6 +231,22 @@ const BettingMatches = () => {
         variant: "destructive"
       });
     }
+    const result = await finishMatch(finishDialogMatch, finalScore1, finalScore2);
+
+// ✅ AJOUTER : Notifier les gagnants et perdants
+for (const [userId, winnings] of Object.entries(result.winnings)) {
+  const isWinner = winnings > 0;
+  await notifyBetResult(
+    userId,
+    isWinner,
+    Math.abs(winnings as number)
+  );
+}
+
+toast({
+  title: "Match terminé! 🏆",
+  description: `${Object.keys(result.winnings).length} gagnants`,
+});
   };
 
   const togglePlayer = (playerId: string, team: 1 | 2) => {
@@ -251,32 +268,17 @@ const BettingMatches = () => {
 
   // ✅ FIX: Nouvelle formule de calcul des cotes basée sur la distribution proportionnelle
   const calculateOdds = (match: MatchWithBetting) => {
-  const total = match.totalBetsTeam1 + match.totalBetsTeam2;
-  
-  // Si aucune mise, cotes par défaut
-  if (total === 0) return { odds1: "2.00", odds2: "2.00" };
-  
-  // ✅ FORMULE CORRECTE:
-  // Si l'équipe 1 a 50€ et l'équipe 2 a 50€:
-  // - Cote équipe 1 = (50 + 50) / 50 = 2.00
-  // - Si je mise 10€ sur équipe 1 qui gagne: je récupère 10 × 2.00 = 20€
-  // - Profit = 20€ - 10€ = 10€ (ma part du pot perdant)
-  
-  // Si l'équipe 1 a 80€ et l'équipe 2 a 20€:
-  // - Cote équipe 1 = 100 / 80 = 1.25 (favorite)
-  // - Cote équipe 2 = 100 / 20 = 5.00 (outsider)
-  // - Si je mise 10€ sur équipe 2 qui gagne: 10 × 5.00 = 50€
-  
-  const odds1 = match.totalBetsTeam1 === 0 
-    ? total.toFixed(2) // Si personne n'a misé sur équipe 1, cote = tout le pot
-    : (total / match.totalBetsTeam1).toFixed(2);
-  
-  const odds2 = match.totalBetsTeam2 === 0 
-    ? total.toFixed(2) // Si personne n'a misé sur équipe 2, cote = tout le pot
-    : (total / match.totalBetsTeam2).toFixed(2);
-  
-  return { odds1, odds2 };
-};
+    const total = match.totalBetsTeam1 + match.totalBetsTeam2;
+    const clamp = (v: number) => Math.max(v, 1.1); // cote mini 1.10
+    
+    // Si aucune mise, cotes par défaut
+    if (total === 0) return { odds1: "2.00", odds2: "2.00" };
+    
+    const rawOdds1 = match.totalBetsTeam1 === 0 ? total : total / match.totalBetsTeam1;
+    const rawOdds2 = match.totalBetsTeam2 === 0 ? total : total / match.totalBetsTeam2;
+    
+    return { odds1: clamp(rawOdds1).toFixed(2), odds2: clamp(rawOdds2).toFixed(2) };
+  };
 
 // ✅ EXPLICATION DU SYSTÈME:
 // 
@@ -351,12 +353,21 @@ const BettingMatches = () => {
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-lg sm:text-xl">Créer un match avec paris</DialogTitle>
+              <DialogDescription>Créez un match et permettez aux autres joueurs de parier sur le résultat.</DialogDescription>
             </DialogHeader>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
+              <div className="flex flex-col gap-3 sm:gap-4 mt-4">
+                <Input
+                  placeholder="Rechercher un joueur"
+                  value={playerSearch}
+                  onChange={(e) => setPlayerSearch(e.target.value)}
+                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-2">
                 <label className="font-semibold text-primary">Équipe 1 ({team1Ids.length}/2)</label>
                 <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {availablePlayers.map(p => (
+                  {availablePlayers
+                    .filter(p => p.username.toLowerCase().includes(playerSearch.toLowerCase()))
+                    .map(p => (
                     <div
                       key={p.id}
                       onClick={() => togglePlayer(p.id, 1)}
@@ -374,7 +385,9 @@ const BettingMatches = () => {
               <div className="space-y-2">
                 <label className="font-semibold text-red-500">Équipe 2 ({team2Ids.length}/2)</label>
                 <div className="space-y-1 max-h-64 overflow-y-auto">
-                  {availablePlayers.map(p => (
+                  {availablePlayers
+                    .filter(p => p.username.toLowerCase().includes(playerSearch.toLowerCase()))
+                    .map(p => (
                     <div
                       key={p.id}
                       onClick={() => togglePlayer(p.id, 2)}
@@ -389,6 +402,7 @@ const BettingMatches = () => {
                   ))}
                 </div>
               </div>
+                </div>
             </div>
             <Button
               onClick={handleCreateMatch}
@@ -504,8 +518,9 @@ const BettingMatches = () => {
                           <Button
                             variant={betTeams[match.id] === 1 ? "default" : "outline"}
                             onClick={() => {
-                              setBetTeams({ ...betTeams, [match.id]: 1 });
-                              handlePlaceBet(match.id);
+                              const team: 1 = 1;
+                              setBetTeams({ ...betTeams, [match.id]: team });
+                              handlePlaceBet(match.id, team);
                             }}
                             className="flex-1"
                           >
@@ -514,8 +529,9 @@ const BettingMatches = () => {
                           <Button
                             variant={betTeams[match.id] === 2 ? "destructive" : "outline"}
                             onClick={() => {
-                              setBetTeams({ ...betTeams, [match.id]: 2 });
-                              handlePlaceBet(match.id);
+                              const team: 2 = 2;
+                              setBetTeams({ ...betTeams, [match.id]: team });
+                              handlePlaceBet(match.id, team);
                             }}
                             className="flex-1"
                           >
@@ -546,6 +562,7 @@ const BettingMatches = () => {
                         <DialogContent>
                           <DialogHeader>
                             <DialogTitle>Entrer les scores</DialogTitle>
+                            <DialogDescription>Entrez les scores finaux du match pour finaliser les paris.</DialogDescription>
                           </DialogHeader>
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 mt-4">
                             <div>

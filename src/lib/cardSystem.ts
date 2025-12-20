@@ -1,6 +1,6 @@
 // 📁 src/lib/cardSystem.ts
 // ============================
-// Configuration et logique du système de cartes
+// Configuration et logique du système de cartes - VERSION CORRIGÉE
 
 /**
  * Interface pour les données complètes d'une carte (utilisée pour le tirage).
@@ -54,10 +54,39 @@ export const codeToCardMap: CardMap = {
     "U986": { nom: "BouBou.png", rarity: "BouBou" },
     "U956": { nom: "Dracaufeu.png", rarity: "PikaPika" }
   },
-  // ... autres saisons
+  season2: {
+    // --- Cartes Communes (Bronze/Silver/Gold) ---
+    "S2N001": { nom: "Player1.png", rarity: "Bronze-NR" },
+    "S2N002": { nom: "Player2.png", rarity: "Bronze-NR" },
+    "S2R001": { nom: "Player3.png", rarity: "Bronze-R" },
+    "S2R002": { nom: "Player4.png", rarity: "Bronze-R" },
+    "S2W001": { nom: "Player5.png", rarity: "Silver-NR" },
+    "S2B001": { nom: "Player6.png", rarity: "Silver-R" },
+    "S2Y001": { nom: "Player7.png", rarity: "Silver-R" },
+    "S2U001": { nom: "Player8.png", rarity: "Silver-R" },
+    "S2Z001": { nom: "Player9.png", rarity: "Silver-NR" },
+    "S2M001": { nom: "Player10.png", rarity: "Silver-R" },
+    "S2C001": { nom: "Player11.png", rarity: "Silver-NR" },
+    "S2Q001": { nom: "Player12.png", rarity: "Silver-NR" },
+    "S2H001": { nom: "Player13.png", rarity: "Gold-NR" },
+    "S2U002": { nom: "Player14.png", rarity: "Gold-NR" },
+    "S2S001": { nom: "Player15.png", rarity: "Gold-R" },
+    "S2K001": { nom: "Player16.png", rarity: "Gold-R" },
+    "S2F001": { nom: "Player17.png", rarity: "Gold-R" },
+    "S2T001": { nom: "Player18.png", rarity: "Espoir" },
+    "S2Q002": { nom: "Player19.png", rarity: "Espoir" },
+    "S2L001": { nom: "Player20.png", rarity: "Icone" },
+    "S2C002": { nom: "Player21.png", rarity: "Icone" },
+    "S2X001": { nom: "Player22.png", rarity: "Future-star" },
+    "S2A001": { nom: "Player23.png", rarity: "Hist.Maker" },
+    "S2T002": { nom: "Player24.png", rarity: "God" },
+    "S2Q003": { nom: "Player25.png", rarity: "Createur" },
+    "S2U003": { nom: "Player26.png", rarity: "BouBou" },
+    "S2U004": { nom: "Player27.png", rarity: "PikaPika" }
+  }
 };
 
-// Poids de rareté pour le tirage (plus le poids est grand, plus la carte est commune)
+// ✅ FIX: Poids de rareté normalisés et équilibrés
 const rarityWeights: { [rarity: string]: number } = {
   "Bronze-NR": 40,
   "Bronze-R": 25,
@@ -75,9 +104,8 @@ const rarityWeights: { [rarity: string]: number } = {
   "Hist.Maker": 0.1,
 };
 
-
 /**
- * Choisit une carte aléatoire basée sur la pondération de rareté.
+ * ✅ Choisit une carte aléatoire basée sur la pondération de rareté.
  * @param season La saison de la carte.
  * @param excludeCodes Codes de cartes à exclure de CE tirage.
  * @returns L'objet carte tirée ou null.
@@ -87,12 +115,18 @@ function pickWeightedCard(
   excludeCodes: Set<string> = new Set()
 ): CardData | null {
   const cardsInSeason = codeToCardMap[season];
-  if (!cardsInSeason) return null;
+  if (!cardsInSeason) {
+    console.warn(`⚠️ Saison "${season}" introuvable dans codeToCardMap`);
+    return null;
+  }
 
   const pool = Object.entries(cardsInSeason)
-    .filter(([code,]) => !excludeCodes.has(code)); 
+    .filter(([code]) => !excludeCodes.has(code)); 
   
-  if (pool.length === 0) return null;
+  if (pool.length === 0) {
+    console.warn(`⚠️ Plus de cartes disponibles dans la saison "${season}"`);
+    return null;
+  }
 
   let totalWeight = 0;
   const weightedCards = pool.map(([code, card]) => {
@@ -115,12 +149,18 @@ function pickWeightedCard(
     }
   }
   
-  return null; // Fallback
+  // Fallback: retourner la première carte si tout échoue
+  const fallback = weightedCards[0];
+  return {
+    code: fallback.code,
+    nom: fallback.nom,
+    rarity: fallback.rarity,
+    season: season
+  } as CardData;
 }
 
-
 /**
- * Effectue un tirage de N cartes uniques pour un booster.
+ * ✅ Effectue un tirage de N cartes uniques pour un booster.
  * L'unicité est garantie *à l'intérieur de ce booster*.
  * @param season La saison de la carte.
  * @param count Le nombre de cartes à tirer.
@@ -133,7 +173,7 @@ export function drawCards(
   const selected: CardData[] = [];
   const pickedCodes: Set<string> = new Set();
   
-  const MAX_ATTEMPTS = count * 5; 
+  const MAX_ATTEMPTS = count * 10; // ✅ Plus de tentatives pour garantir le succès
   let attempts = 0;
 
   while (selected.length < count && attempts < MAX_ATTEMPTS) {
@@ -144,8 +184,13 @@ export function drawCards(
       selected.push(pickedCard);
       pickedCodes.add(pickedCard.code);
     } else if (!pickedCard) {
+      console.error(`❌ Impossible de tirer une carte après ${attempts} tentatives`);
       break;
     }
+  }
+  
+  if (selected.length < count) {
+    console.warn(`⚠️ Seulement ${selected.length}/${count} cartes tirées`);
   }
   
   return selected;
@@ -155,29 +200,131 @@ export function drawCards(
 export type Rarity = "bronze" | "silver" | "gold" | "espoir" | "icone" | "future-star" | "god" | "creator" | "unknown";
 
 /**
- * Fonction pour convertir une rareté interne en catégorie UI.
- * @param rarity La chaîne de rareté (e.g., "Bronze-NR").
+ * ✅ FIX MAJEUR: Fonction pour convertir une rareté interne en catégorie UI.
+ * Gère maintenant correctement toutes les variations de casse et de format.
+ * @param rarity La chaîne de rareté (e.g., "Bronze-NR", "Future-star").
  * @returns La catégorie UI normalisée.
  */
 export function getRarityCategory(rarity: string): Rarity {
-  // ✅ FIX: Normaliser la chaîne pour éviter les problèmes de casse
-  const normalizedRarity = rarity.trim();
+  // ✅ Normalisation complète: trim + lowercase
+  const normalized = rarity.trim().toLowerCase();
   
-  if (normalizedRarity.includes("Bronze")) return "bronze";
-  if (normalizedRarity.includes("Silver")) return "silver";
-  if (normalizedRarity.includes("Gold")) return "gold";
-  if (normalizedRarity === "Espoir") return "espoir";
-  if (normalizedRarity === "Icone") return "icone";
+  // Cartes communes
+  if (normalized.includes("bronze")) return "bronze";
+  if (normalized.includes("silver")) return "silver";
+  if (normalized.includes("gold")) return "gold";
   
-  // ✅ FIX CRITIQUE: "Future-star" avec majuscule au lieu de "future-star"
-  if (normalizedRarity === "Future-star") return "future-star";
+  // Cartes spéciales
+  if (normalized === "espoir") return "espoir";
+  if (normalized === "icone") return "icone";
+  if (normalized === "future-star") return "future-star";
   
-  // ✅ FIX: Amélioration de la détection des raretés ultra-rares
-  if (["God", "PikaPika", "BouBou", "Hist.Maker"].includes(normalizedRarity)) {
+  // ✅ Cartes ultra-rares (toutes mappées vers "god" ou "creator")
+  if (["god", "pikapika", "boubou", "hist.maker"].includes(normalized)) {
     return "god";
   }
   
-  if (normalizedRarity === "Createur") return "creator";
+  if (normalized === "createur") return "creator";
   
+  console.warn(`⚠️ Rareté inconnue: "${rarity}" (normalisée: "${normalized}")`);
   return "unknown"; 
+}
+
+/**
+ * ✅ Liste complète des raretés ultra-rares (pour les stats)
+ */
+export const ULTRA_RARE_RARITIES = [
+  "God", 
+  "Createur", 
+  "PikaPika", 
+  "BouBou", 
+  "Hist.Maker",
+  "Future-star", // ✅ Ajouté car très rare
+  "Icone"        // ✅ Ajouté car très rare
+];
+
+/**
+ * ✅ Vérifie si une rareté est ultra-rare
+ */
+export function isUltraRare(rarity: string): boolean {
+  return ULTRA_RARE_RARITIES.some(
+    ultra => rarity.toLowerCase() === ultra.toLowerCase()
+  );
+}
+
+/**
+ * ✅ Retourne la liste de toutes les saisons disponibles
+ */
+export function getAvailableSeasons(): string[] {
+  return Object.keys(codeToCardMap).sort();
+}
+
+/**
+ * ✅ Retourne le nom d'affichage d'une saison
+ */
+export function getSeasonDisplayName(season: string): string {
+  const seasonNames: { [key: string]: string } = {
+    season1: "Saison 1",
+    season2: "Saison 2",
+    season3: "Saison 3" // Préparé pour l'avenir
+  };
+  return seasonNames[season] || season;
+}
+
+/**
+ * ✅ Obtient toutes les cartes d'une saison spécifique
+ */
+export function getCardsForSeason(season: string): CardData[] {
+  const cardsInSeason = codeToCardMap[season];
+  if (!cardsInSeason) return [];
+  
+  return Object.entries(cardsInSeason).map(([code, card]) => ({
+    code,
+    nom: card.nom,
+    rarity: card.rarity,
+    season
+  }));
+}
+
+/**
+ * ✅ Obtient le nombre total de cartes dans une saison
+ */
+export function getTotalCardsInSeason(season: string): number {
+  const cardsInSeason = codeToCardMap[season];
+  return cardsInSeason ? Object.keys(cardsInSeason).length : 0;
+}
+
+/**
+ * ✅ Vérifie si un code de carte existe
+ */
+export function cardExists(code: string, season?: string): boolean {
+  if (season) {
+    return !!(codeToCardMap[season]?.[code]);
+  }
+  
+  // Chercher dans toutes les saisons
+  for (const seasonCards of Object.values(codeToCardMap)) {
+    if (seasonCards[code]) return true;
+  }
+  
+  return false;
+}
+
+/**
+ * ✅ Obtient les informations d'une carte par son code
+ */
+export function getCardByCode(code: string): (CardData & { found: boolean }) | null {
+  for (const [season, cards] of Object.entries(codeToCardMap)) {
+    if (cards[code]) {
+      return {
+        code,
+        nom: cards[code].nom,
+        rarity: cards[code].rarity,
+        season,
+        found: true
+      };
+    }
+  }
+  
+  return null;
 }

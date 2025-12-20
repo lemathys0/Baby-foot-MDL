@@ -5,12 +5,16 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { ref, get, set, update, push } from "firebase/database";
+import { 
+  notifyTournamentStarting, 
+  notifyFortuneReceived 
+} from "@/lib/firebaseNotifications";
 import { database } from "@/lib/firebase";
-import { searchUsers, UserProfile } from "@/lib/firebaseExtended";
+import { searchUsers, UserProfile, addFortuneHistoryEntry } from "@/lib/firebaseExtended";
 
 interface TournamentPlayer {
   userId: string;
@@ -237,24 +241,17 @@ const Tournament = () => {
       const tournamentRef = ref(database, "tournaments/active");
       const snapshot = await get(tournamentRef);
 
-      let tournament: Tournament;
-
       if (!snapshot.exists()) {
-        const now = Date.now();
-        tournament = {
-          id: `tournament_${now}`,
-          startTime: now,
-          endTime: now + 75 * 60 * 1000,
-          isActive: true,
-          players: [],
-          matches: {},
-          winners: [],
-          prizePool: 0,
-          currentRound: 0,
-        };
-      } else {
-        tournament = snapshot.val();
+        toast({
+          title: "Aucun tournoi actif",
+          description: "Un admin doit d'abord créer le tournoi depuis le panneau admin.",
+          variant: "destructive",
+        });
+        setIsLoading(false);
+        return;
       }
+
+      const tournament = snapshot.val() as Tournament;
 
       const alreadyRegistered = tournament.players.some((p) => p.userId === user.uid);
       if (alreadyRegistered) {
@@ -296,7 +293,8 @@ const Tournament = () => {
         }
       }
 
-      updates["tournaments/active"] = tournament;
+      updates["tournaments/active/players"] = tournament.players;
+      updates["tournaments/active/prizePool"] = tournament.prizePool;
 
       await update(ref(database), updates);
 
@@ -304,6 +302,11 @@ const Tournament = () => {
         title: "Inscription réussie! 🎉",
         description: `Vous êtes inscrit ${playMode === "duo" ? `en duo (${totalFees}€ total)` : `en solo (${entryFee}€)`}`,
       });
+      await notifyTournamentStarting(
+  user.uid,
+  "Tournoi Quotidien",
+  "dans quelques instants"
+);
 
       setShowRegisterDialog(false);
       setPartnerUsername("");
@@ -322,7 +325,9 @@ const Tournament = () => {
   };
 
   const isTournamentTime = () => {
-    return true;
+    const now = new Date();
+    const currentHour = now.getHours() + now.getMinutes() / 60;
+    return currentHour >= TOURNAMENT_START && currentHour < TOURNAMENT_END;
   };
 
   // 🎯 FONCTION - Mettre à jour le score d'un match
@@ -521,7 +526,21 @@ const Tournament = () => {
       
       if (winnerSnapshot.exists()) {
         const currentFortune = winnerSnapshot.val().fortune || 0;
-        updates[`users/${winnerId}/fortune`] = currentFortune + firstPrize;
+        const newFortune = currentFortune + firstPrize;
+        updates[`users/${winnerId}/fortune`] = newFortune;
+
+        // Historique de fortune (gagnant tournoi)
+        await addFortuneHistoryEntry(
+          winnerId,
+          newFortune,
+          firstPrize,
+          "Récompense tournoi"
+        );
+        await notifyFortuneReceived(
+  winnerId,
+  firstPrize,
+  "Victoire du tournoi quotidien"
+);
       }
 
       updates['tournaments/active/status'] = 'completed';
@@ -635,80 +654,6 @@ const Tournament = () => {
     }
   };
 
-  // 🧪 FONCTION DE TEST - Inscrire tous les joueurs
-  const registerAllPlayers = async () => {
-    if (!confirm("⚠️ Inscrire TOUS les joueurs au tournoi ?")) return;
-    
-    setIsLoading(true);
-    try {
-      const usersRef = ref(database, 'users');
-      const usersSnapshot = await get(usersRef);
-      const users = usersSnapshot.val();
-      
-      if (!users) {
-        toast({ title: "Erreur", description: "Aucun utilisateur trouvé", variant: "destructive" });
-        return;
-      }
-      
-      const tournamentRef = ref(database, 'tournaments/active');
-      const tournamentSnapshot = await get(tournamentRef);
-      
-      let tournament;
-      if (!tournamentSnapshot.exists()) {
-        const now = Date.now();
-        tournament = {
-          id: `tournament_${now}`,
-          startTime: now,
-          endTime: now + 75 * 60 * 1000,
-          isActive: true,
-          players: [],
-          matches: {},
-          winners: [],
-          prizePool: 0,
-          currentRound: 0,
-        };
-      } else {
-        tournament = tournamentSnapshot.val();
-      }
-      
-      const ENTRY_FEE = 50;
-      let registered = 0;
-      const updates: { [key: string]: any } = {};
-      
-      Object.keys(users).forEach(userId => {
-        const user = users[userId];
-        
-        if (tournament.players.some((p: any) => p.userId === userId)) return;
-        
-        const fortune = user.fortune || 0;
-        if (fortune < ENTRY_FEE) return;
-        
-        tournament.players.push({
-          userId: userId,
-          username: user.username,
-          eloRating: user.eloRating || 1000,
-        });
-        
-        updates[`users/${userId}/fortune`] = fortune - ENTRY_FEE;
-        tournament.prizePool += ENTRY_FEE;
-        registered++;
-      });
-      
-      updates['tournaments/active'] = tournament;
-      await update(ref(database), updates);
-      
-      toast({
-        title: "✅ Inscription réussie!",
-        description: `${registered} joueurs inscrits - Cagnotte: ${tournament.prizePool}€`,
-      });
-      
-      await loadTournamentData();
-    } catch (error: any) {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   // Grouper les matchs par round
   const getMatchesByRound = () => {
@@ -746,44 +691,6 @@ const Tournament = () => {
             </Badge>
           )}
           
-          {/* 🧪 BOUTONS DE TEST */}
-          <div className="flex gap-2 justify-center mt-2">
-            <Button 
-              onClick={registerAllPlayers}
-              variant="outline"
-              size="sm"
-              className="border-yellow-500 text-yellow-500 hover:bg-yellow-500/10"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  Inscription...
-                </>
-              ) : (
-                <>🧪 Inscrire tous</>
-              )}
-            </Button>
-            
-            {currentTournament && currentTournament.players.length >= 2 && !currentTournament.status && (
-              <Button 
-                onClick={startTournament}
-                variant="outline"
-                size="sm"
-                className="border-green-500 text-green-500 hover:bg-green-500/10"
-                disabled={isLoading}
-              >
-                {isLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Lancement...
-                  </>
-                ) : (
-                  <>🎮 Lancer tournoi</>
-                )}
-              </Button>
-            )}
-          </div>
         </div>
 
         <Card className="mb-6 border-primary/50">
@@ -958,9 +865,9 @@ const Tournament = () => {
                                   </p>
                                 </div>
                                 
-                                <div className="flex items-center gap-2">
-                                  {match.status !== "completed" && matchId && (
-                                    <>
+                              <div className="flex items-center gap-2">
+                                  {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
+                                  <>
                                       <Button
                                         size="sm"
                                         variant="outline"
@@ -999,7 +906,7 @@ const Tournament = () => {
                                 </div>
                                 
                                 <div className="flex items-center gap-2">
-                                  {match.status !== "completed" && matchId && (
+                                  {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
                                     <>
                                       <Button
                                         size="sm"
@@ -1028,7 +935,7 @@ const Tournament = () => {
                               </div>
 
                               {/* BOUTON TERMINER LE MATCH */}
-                              {match.status !== "completed" && matchId && (
+                              {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
                                 <Button
                                   onClick={() => finishMatch(matchId)}
                                   className="w-full"
@@ -1089,6 +996,7 @@ const Tournament = () => {
                 <AlertCircle className="h-5 w-5 text-primary" />
                 Règles du Tournoi
               </DialogTitle>
+              <DialogDescription>Consultez les règles et le format du tournoi.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>
@@ -1142,6 +1050,7 @@ const Tournament = () => {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Inscription au Tournoi</DialogTitle>
+              <DialogDescription>Choisissez votre mode de jeu et inscrivez-vous au tournoi.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div>

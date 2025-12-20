@@ -1,16 +1,13 @@
 import { useState, useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mail, Lock, User, Eye, EyeOff, Loader2, AlertCircle, Shield } from "lucide-react";
+import { Mail, Lock, User, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { z } from "zod";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
-import { ref, update } from "firebase/database";
-import { database } from "@/lib/firebase";
-import { toast } from "@/hooks/use-toast";
 
 // Validation schemas
 const loginSchema = z.object({
@@ -112,60 +109,6 @@ const Auth = () => {
     }
   };
 
-  // 🔧 FONCTION TEMPORAIRE - Créer un compte admin
-  const handleCreateAdminAccount = async () => {
-    if (!confirm("⚠️ Créer un compte administrateur de test ?\n\nEmail: admin@test.com\nPassword: admin123")) {
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      // 1. Créer le compte
-      const result = await signup("admin@test.com", "admin123", "Admin");
-      
-      if (result.error) {
-        toast({
-          title: "Erreur",
-          description: result.error,
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // 2. Attendre que l'utilisateur soit créé
-      await new Promise(resolve => setTimeout(resolve, 2000));
-
-      // 3. Ajouter le rôle admin
-      const auth = getAuth();
-      const currentUser = auth.currentUser;
-      
-      if (currentUser) {
-        const userRef = ref(database, `users/${currentUser.uid}`);
-        await update(userRef, {
-          role: "admin"
-        });
-
-        toast({
-          title: "✅ Compte admin créé!",
-          description: "Email: admin@test.com | Password: admin123",
-        });
-
-        // Rediriger vers /admin
-        setTimeout(() => {
-          navigate("/admin");
-        }, 1500);
-      }
-    } catch (error: any) {
-      console.error("Erreur création admin:", error);
-      toast({
-        title: "Erreur",
-        description: error.message || "Impossible de créer le compte admin",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
@@ -231,26 +174,6 @@ const Auth = () => {
           </h1>
         </motion.div>
 
-        {/* 🔧 BOUTON ADMIN TEMPORAIRE - À SUPPRIMER EN PRODUCTION */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="mb-4"
-        >
-          <Button
-            onClick={handleCreateAdminAccount}
-            disabled={isLoading}
-            className="w-full bg-yellow-600 hover:bg-yellow-700"
-            size="sm"
-          >
-            <Shield className="mr-2 h-4 w-4" />
-            🔧 Créer un compte admin de test
-          </Button>
-          <p className="text-xs text-center text-muted-foreground mt-1">
-            ⚠️ Bouton de développement - À supprimer en production
-          </p>
-        </motion.div>
 
         <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
           <CardHeader className="text-center">

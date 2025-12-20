@@ -1,6 +1,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
+import { getMessaging } from "firebase/messaging";
 
 // Configuration Firebase - Remplacez par vos propres valeurs
 const firebaseConfig = {
@@ -22,5 +23,5 @@ export const auth = getAuth(app);
 
 // Initialize Realtime Database and get a reference to the service
 export const database = getDatabase(app);
-
+export const messaging = getMessaging(app);
 export default app;

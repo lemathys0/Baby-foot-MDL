@@ -5,8 +5,9 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { notifyFortuneReceived } from "@/lib/firebaseNotifications";
 import { toast } from "@/hooks/use-toast";
 import { ref, get, onValue } from "firebase/database";
 import { database } from "@/lib/firebase";
@@ -379,7 +380,24 @@ const Clubs = () => {
         description: error.message || "Impossible d'acheter le bonus",
         variant: "destructive",
       });
-    }
+    } 
+    await buyClubBonus(myClub.id, bonusId as any, cost);
+
+// ✅ AJOUTER : Notifier tous les membres du club
+if (myClub.members) {
+  for (const memberId of Object.keys(myClub.members)) {
+    await notifyAdminAnnouncement(
+      memberId,
+      "Nouveau bonus de club",
+      `Le bonus "${CLUB_BONUSES.find(b => b.id === bonusId)?.name}" est maintenant actif !`
+    );
+  }
+}
+
+toast({
+  title: "Bonus acheté! 🎁",
+  description: "Le bonus est maintenant actif pour tous les membres",
+});
   };
 
   // Fonction helper pour obtenir le nombre de membres
@@ -409,18 +427,18 @@ const Clubs = () => {
           animate={{ opacity: 1, y: 0 }}
           className="max-w-2xl mx-auto"
         >
-          <Card className="text-center p-12">
+          <Card className="text-center p-8 sm:p-12">
             <Users className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
             <h2 className="text-2xl font-bold mb-2">Vous n'avez pas de club</h2>
             <p className="text-muted-foreground mb-6">
               Créez ou rejoignez un club pour profiter des bonus collectifs
             </p>
-            <div className="flex gap-3 justify-center">
-              <Button onClick={() => setShowCreateDialog(true)} size="lg">
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button onClick={() => setShowCreateDialog(true)} size="lg" className="w-full sm:w-auto">
                 <Plus className="h-5 w-5 mr-2" />
                 Créer un club
               </Button>
-              <Button onClick={() => setShowJoinDialog(true)} size="lg" variant="outline">
+              <Button onClick={() => setShowJoinDialog(true)} size="lg" variant="outline" className="w-full sm:w-auto">
                 <Search className="h-5 w-5 mr-2" />
                 Rejoindre un club
               </Button>
@@ -438,6 +456,7 @@ const Clubs = () => {
               </button>
               <DialogHeader>
                 <DialogTitle>Créer un club</DialogTitle>
+                <DialogDescription>Créez votre propre club et invitez d'autres joueurs à vous rejoindre.</DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
                 <div>
@@ -517,6 +536,7 @@ const Clubs = () => {
               </button>
               <DialogHeader>
                 <DialogTitle>Rejoindre un club</DialogTitle>
+                <DialogDescription>Recherchez et rejoignez un club existant.</DialogDescription>
               </DialogHeader>
               
               <div className="space-y-4">
@@ -775,6 +795,7 @@ const Clubs = () => {
             </button>
             <DialogHeader>
               <DialogTitle>Contribuer à la trésorerie</DialogTitle>
+              <DialogDescription>Ajoutez de la fortune à la trésorerie de votre club.</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">

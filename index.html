@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="fr">
   <head>
     <meta charset="UTF-8" />
@@ -24,6 +24,11 @@
     
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/logo-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/icons/logo-16x16.png">
+    <style>
+      /* Prevent FOUC (Flash of Unstyled Content) */
+      body { visibility: hidden; }
+      body.loaded { visibility: visible; }
+    </style>
   </head>
 
   <body>

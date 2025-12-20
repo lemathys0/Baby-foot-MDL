@@ -9,7 +9,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { ref, get } from "firebase/database";
 import { database } from "@/lib/firebase";
-import { SHOP_ITEMS, equipItem, openLootbox, type ShopItem, type LootboxReward } from "@/lib/firebaseExtended";
+import { SHOP_ITEMS, equipItem, openLootbox, type ShopItem, type LootboxReward, type ItemType } from "@/lib/firebaseExtended";
 
 const rarityConfig = {
   common: {
@@ -61,6 +61,7 @@ const Inventory = () => {
     avatar: "",
     theme: "",
     banner: "",
+    title: "",
     effect: "",
   });
   const [isLoading, setIsLoading] = useState(true);
@@ -90,6 +91,7 @@ const Inventory = () => {
           avatar: data.avatar || "",
           theme: data.theme || "",
           banner: data.banner || "",
+          title: data.title || "",
           effect: data.effect || "",
         });
       }
@@ -105,7 +107,7 @@ const Inventory = () => {
     }
   };
 
-  const handleEquip = async (itemId: string, itemType: string) => {
+  const handleEquip = async (itemId: string, itemType: ItemType) => {
     if (!user) return;
 
     setIsEquipping(true);
@@ -210,6 +212,7 @@ const Inventory = () => {
     avatar: ownedItems.filter(i => i.type === "avatar"),
     theme: ownedItems.filter(i => i.type === "theme"),
     banner: ownedItems.filter(i => i.type === "banner"),
+    title: ownedItems.filter(i => i.type === "title"),
     effect: ownedItems.filter(i => i.type === "effect"),
   };
 
@@ -218,6 +221,7 @@ const Inventory = () => {
     avatars: itemsByType.avatar.length,
     themes: itemsByType.theme.length,
     banners: itemsByType.banner.length,
+    titles: itemsByType.title.length,
     effects: itemsByType.effect.length,
     lootboxes: ownedLootboxes.reduce((sum, lb) => sum + lb.count, 0),
   };
@@ -281,6 +285,13 @@ const Inventory = () => {
           </Card>
           <Card>
             <CardContent className="p-4 text-center">
+              <div className="text-2xl mx-auto mb-2">🏷️</div>
+              <p className="text-2xl font-bold">{stats.titles}</p>
+              <p className="text-xs text-muted-foreground">Titres</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
               <div className="text-2xl mx-auto mb-2">⚡</div>
               <p className="text-2xl font-bold">{stats.effects}</p>
               <p className="text-xs text-muted-foreground">Effets</p>
@@ -327,6 +338,7 @@ const Inventory = () => {
                             {type === "avatar" && <Star className="h-5 w-5 text-primary" />}
                             {type === "theme" && <Sparkles className="h-5 w-5 text-primary" />}
                             {type === "banner" && <div className="text-xl">🎯</div>}
+                            {type === "title" && <div className="text-xl">🏷️</div>}
                             {type === "effect" && <div className="text-xl">⚡</div>}
                             {type}s ({items.length})
                           </CardTitle>
@@ -339,11 +351,32 @@ const Inventory = () => {
                               return (
                                 <motion.div key={item.id} whileHover={{ scale: 1.05 }} className={`p-3 rounded-lg border-2 transition-all text-center ${isEquipped ? `${rarity.borderColor} bg-primary/5` : "border-border hover:border-primary/50"}`}>
                                   {item.type === "theme" && item.preview ? (
-                                    <div className="w-16 h-16 rounded-lg mx-auto mb-2 border-2 border-white/20" style={{ backgroundColor: item.preview }} />
+                                    <div
+                                      className="w-16 h-16 rounded-lg mx-auto mb-2 border-2 border-white/20"
+                                      style={{ backgroundColor: item.preview }}
+                                    />
+                                  ) : item.type === "banner" && item.preview ? (
+                                    <div
+                                      className="w-full h-16 rounded-lg mx-auto mb-2 border-2 border-white/20 relative overflow-hidden"
+                                      style={{ background: item.preview }}
+                                    >
+                                      <div className="absolute inset-0 flex items-center justify-center">
+                                        <span className="text-2xl">{item.icon}</span>
+                                      </div>
+                                    </div>
+                                  ) : item.type === "title" && item.preview ? (
+                                    <div className="flex flex-col items-center gap-1 mb-1">
+                                      <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r from-sky-500/20 via-cyan-500/20 to-indigo-500/20 border border-cyan-400/50">
+                                        <span className="text-base">{item.icon}</span>
+                                        <span className="text-[9px] font-semibold tracking-wide uppercase text-cyan-100 line-clamp-1">
+                                          {item.preview}
+                                        </span>
+                                      </div>
+                                    </div>
                                   ) : (
                                     <div className="text-4xl mb-2">{item.icon || item.preview}</div>
                                   )}
-                                  <p className="text-xs font-medium mb-2 line-clamp-1">{item.name}</p>
+                                  <p className="text-xs font-medium mb-1 line-clamp-1">{item.name}</p>
                                   {isEquipped ? (
                                     <Badge variant="default" className="w-full text-xs">Équipé ✓</Badge>
                                   ) : (

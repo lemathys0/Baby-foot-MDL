@@ -8,6 +8,7 @@ import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from 'react-router-dom';
+import { notifyMatchCompleted } from "@/lib/firebaseNotifications";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { 
     recordMatch, 
@@ -123,7 +124,19 @@ const RecordMatchForm = () => {
       );
 
       const winner = score1 > score2 ? "Équipe 1" : "Équipe 2";
-      
+      const allPlayerIds = [...team1Ids, ...team2Ids];
+      for (const update of result.eloUpdates) {
+  const isWinner = (score1 > score2 && team1Ids.includes(update.userId)) ||
+                   (score2 > score1 && team2Ids.includes(update.userId));
+  
+  await notifyMatchCompleted(
+    update.userId,
+    `${winner} a gagné ${score1}-${score2}`,
+    update.eloChange
+  );
+}
+
+
       setEloUpdates(result.eloUpdates);
       setShowEloUpdates(true);
 

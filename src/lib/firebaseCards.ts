@@ -1,153 +1,210 @@
 // 📁 src/lib/firebaseCards.ts
+// ============================
+// Gestion des cartes dans Firebase - VERSION CORRIGÉE (Support Booster Mixte S1+S2)
+
 import { ref, get, update } from "firebase/database";
 import { database } from "./firebase";
+import { CardData } from "./cardSystem";
 
-// ⭐️ FIX: Re-export statique des types et fonctions
-export { CardData, getRarityCategory } from "./cardSystem"; 
+// ✅ Re-export des types et fonctions utilitaires
+export { 
+  getRarityCategory, 
+  isUltraRare,
+  getAvailableSeasons,
+  getSeasonDisplayName,
+  cardExists,
+  getCardByCode
+} from "./cardSystem"; 
 
-// Interface pour le format de données de la collection optimisée
+export type { CardData };
+
 export interface UserCardQuantities {
-    [code: string]: number;
+  [code: string]: number;
 }
 
 export type UniqueCardData = CardData & { ownedCount: number };
 
-// ✅ FIX: Liste complète des raretés ultra-rares
-const ULTRA_RARE_CARDS = [
-  "Gold-NR", 
-  "Gold-R", 
-  "God", 
-  "Createur", 
-  "PikaPika", 
-  "BouBou", 
-  "Hist.Maker"
-];
-
 /**
- * Charge la collection de l'utilisateur sous forme de Map de quantités.
+ * ✅ Charge la collection de l'utilisateur (Map de quantités)
  */
 export async function getUserCardQuantities(uid: string): Promise<UserCardQuantities> {
   try {
     const userRef = ref(database, `users/${uid}/cards`);
     const snapshot = await get(userRef);
-    if (!snapshot.exists()) return {};
-    
-    return snapshot.val() || {}; 
+    return snapshot.exists() ? snapshot.val() : {};
   } catch (error) {
-    console.error("Erreur lors du chargement des quantités de cartes:", error);
+    console.error("❌ Erreur chargement quantités:", error);
     return {};
   }
 }
 
 /**
- * Charge la collection et la reformate pour le composant UI (BabyDex.tsx).
+ * ✅ Charge la collection formatée pour l'affichage (BabyDex)
  */
 export async function getUserCards(uid: string): Promise<UniqueCardData[]> {
-    const quantities = await getUserCardQuantities(uid);
-    const uniqueCards: UniqueCardData[] = [];
-    const season = "season1";
+  const quantities = await getUserCardQuantities(uid);
+  const uniqueCards: UniqueCardData[] = [];
+  const { codeToCardMap } = await import("./cardSystem");
+  
+  for (const [code, ownedCount] of Object.entries(quantities)) {
+    if (ownedCount <= 0) continue;
     
-    const { codeToCardMap } = await import("./cardSystem");
-
-    for (const [code, ownedCount] of Object.entries(quantities)) {
-        if (ownedCount > 0 && codeToCardMap[season]?.[code]) { 
-            const cardInfo = codeToCardMap[season][code];
-            uniqueCards.push({
-                code: code,
-                nom: cardInfo.nom,
-                rarity: cardInfo.rarity,
-                season: season,
-                ownedCount: ownedCount,
-            });
-        }
+    let found = false;
+    for (const [season, cards] of Object.entries(codeToCardMap)) {
+      if (cards[code]) {
+        uniqueCards.push({
+          code,
+          nom: cards[code].nom,
+          rarity: cards[code].rarity,
+          season,
+          ownedCount,
+        });
+        found = true;
+        break; 
+      }
     }
-
-    return uniqueCards.sort((a, b) => a.code.localeCompare(b.code));
+  }
+  
+  return uniqueCards.sort((a, b) => a.season.localeCompare(b.season) || a.code.localeCompare(b.code));
 }
 
 /**
- * Ouvre un booster, tire des cartes et met à jour la base de données.
+ * ✅ Ouvre un booster : Gère la saison spécifique OU le mélange (S1 + S2)
  */
-export async function openBoosterPack(uid: string): Promise<CardData[]> {
-  const NUM_CARDS_IN_BOOSTER = 3;
+export async function openBoosterPack(
+  uid: string, 
+  season: string = "season1"
+): Promise<CardData[]> {
+  const NUM_CARDS_IN_BOOSTER = 5; // Nombre de cartes par booster
   
   try {
     const userRef = ref(database, `users/${uid}`);
-    const { drawCards } = await import("./cardSystem");
+    const { drawCards, getAvailableSeasons, codeToCardMap } = await import("./cardSystem");
+    
+    let drawnCards: CardData[] = [];
 
-    const drawnCards = drawCards("season1", NUM_CARDS_IN_BOOSTER); 
+    // --- LOGIQUE DE TIRAGE ---
+    if (season === "mixed") {
+      // ✅ BOOSTER MÉLANGÉ : On pioche chaque carte dans une saison aléatoire
+      const availableSeasons = getAvailableSeasons();
+      for (let i = 0; i < NUM_CARDS_IN_BOOSTER; i++) {
+        const randomSeason = availableSeasons[Math.floor(Math.random() * availableSeasons.length)];
+        const result = drawCards(randomSeason, 1);
+        if (result.length > 0) {
+          // On force l'ajout de la saison pour le chemin de l'image
+          drawnCards.push({ ...result[0], season: randomSeason });
+        }
+      }
+    } else {
+      // ✅ BOOSTER CLASSIQUE : Une seule saison
+      if (!codeToCardMap[season]) throw new Error(`Saison "${season}" introuvable`);
+      const result = drawCards(season, NUM_CARDS_IN_BOOSTER);
+      drawnCards = result.map(c => ({ ...c, season }));
+    }
+    
+    if (drawnCards.length === 0) throw new Error("Échec du tirage des cartes");
 
+    // --- MISE À JOUR BASE DE DONNÉES ---
     const userSnapshot = await get(userRef);
     const user = userSnapshot.val() || {};
+    const existingQuantities = user.cards || {};
+    let totalBabyCards = user.totalBabyCards || 0;
     
-    const existingQuantities: UserCardQuantities = user.cards || {};
-    let currentTotalCards = user.totalBabyCards || 0; 
-
-    const cardQuantityUpdates: UserCardQuantities = {};
-    
+    const updates: any = {};
     drawnCards.forEach(card => {
-        const currentCount = existingQuantities[card.code] || 0;
-        cardQuantityUpdates[card.code] = currentCount + 1;
-        currentTotalCards++;
+      const newQty = (existingQuantities[card.code] || 0) + 1;
+      updates[`cards/${card.code}`] = newQty;
+      totalBabyCards++;
     });
 
-    const finalCardQuantities = {
-        ...existingQuantities,
-        ...cardQuantityUpdates
-    };
-    
-    const updatePayload = {
-        cards: finalCardQuantities,
-        totalBabyCards: currentTotalCards,
-        lastBoosterOpened: new Date().toISOString(),
-    };
-    
-    await update(userRef, updatePayload);
+    updates['totalBabyCards'] = totalBabyCards;
+    updates['lastBoosterOpened'] = new Date().toISOString();
+
+    await update(userRef, updates);
     
     return drawnCards;
   } catch (error) {
-    console.error("Erreur lors de l'ouverture du booster:", error);
-    throw new Error("Impossible d'ouvrir le booster et de mettre à jour la collection.");
+    console.error("❌ Erreur openBoosterPack:", error);
+    throw error;
   }
 }
 
 /**
- * Fonction utilitaire pour les statistiques
- * ✅ FIX: Utilise la constante ULTRA_RARE_CARDS
+ * ✅ Statistiques de collection optimisées
  */
-export async function getCardStats(uid: string): Promise<{ 
-  totalCards: number; 
-  uniqueCards: number; 
-  rareCards: number 
-}> {
-    try {
-        const quantities = await getUserCardQuantities(uid);
-        let totalCards = 0;
-        let uniqueCards = 0;
-        let rareCards = 0;
-        
-        const { codeToCardMap } = await import("./cardSystem");
-
-        for (const [code, count] of Object.entries(quantities)) {
-            if (count > 0) {
-                totalCards += count;
-                uniqueCards++;
-                
-                const cardInfo = codeToCardMap.season1[code];
-                // ✅ Vérification unifiée avec constante
-                if (cardInfo && ULTRA_RARE_CARDS.includes(cardInfo.rarity)) {
-                    rareCards += count;
-                }
-            }
+export async function getCardStats(uid: string) {
+  try {
+    const quantities = await getUserCardQuantities(uid);
+    let totalCards = 0, uniqueCards = 0, rareCards = 0, ultraRareCards = 0;
+    const cardsBySeason: { [season: string]: number } = {};
+    const { codeToCardMap, isUltraRare } = await import("./cardSystem");
+    
+    for (const [season, cards] of Object.entries(codeToCardMap)) {
+      cardsBySeason[season] = 0;
+      for (const [code, count] of Object.entries(quantities)) {
+        if (count > 0 && cards[code]) {
+          totalCards += count;
+          uniqueCards++;
+          cardsBySeason[season]++;
+          if (isUltraRare(cards[code].rarity)) {
+            rareCards += count;
+            ultraRareCards++;
+          }
         }
-
-        return {
-            totalCards: totalCards,
-            uniqueCards: uniqueCards,
-            rareCards: rareCards,
-        };
-    } catch (error) {
-        console.error("Erreur lors du chargement des stats:", error);
-        return { totalCards: 0, uniqueCards: 0, rareCards: 0 };
+      }
     }
+    return { totalCards, uniqueCards, rareCards, ultraRareCards, cardsBySeason };
+  } catch (error) {
+    return { totalCards: 0, uniqueCards: 0, rareCards: 0, ultraRareCards: 0, cardsBySeason: {} };
+  }
+}
+
+/**
+ * ✅ Progression d'une saison spécifique
+ */
+export async function getSeasonProgress(uid: string, season: string) {
+  try {
+    const quantities = await getUserCardQuantities(uid);
+    const { codeToCardMap, getTotalCardsInSeason } = await import("./cardSystem");
+    const seasonCards = codeToCardMap[season];
+    if (!seasonCards) return { owned: 0, total: 0, percentage: 0 };
+    
+    const total = getTotalCardsInSeason(season);
+    let owned = 0;
+    for (const code of Object.keys(seasonCards)) {
+      if (quantities[code] > 0) owned++;
+    }
+    return { owned, total, percentage: total > 0 ? Math.round((owned / total) * 100) : 0 };
+  } catch (error) {
+    return { owned: 0, total: 0, percentage: 0 };
+  }
+}
+
+/**
+ * ✅ Vérifie si l'utilisateur possède une carte
+ */
+export async function hasCard(uid: string, cardCode: string): Promise<number> {
+  const quantities = await getUserCardQuantities(uid);
+  return quantities[cardCode] || 0;
+}
+
+/**
+ * ✅ Ajoute/Retire des cartes manuellement (Admin)
+ */
+export async function updateCardQuantity(uid: string, cardCode: string, quantity: number): Promise<void> {
+  const { cardExists } = await import("./cardSystem");
+  if (!cardExists(cardCode)) throw new Error(`Carte "${cardCode}" introuvable`);
+  
+  const userRef = ref(database, `users/${uid}`);
+  const snap = await get(userRef);
+  const user = snap.val() || {};
+  
+  const currentCount = (user.cards || {})[cardCode] || 0;
+  const newCount = Math.max(0, currentCount + quantity);
+  const diff = newCount - currentCount;
+  
+  await update(userRef, {
+    [`cards/${cardCode}`]: newCount,
+    totalBabyCards: Math.max(0, (user.totalBabyCards || 0) + diff),
+  });
 }

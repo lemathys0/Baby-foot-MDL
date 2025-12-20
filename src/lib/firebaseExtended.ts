@@ -132,7 +132,7 @@ export async function contributeToClub(
 
     const userData = userSnapshot.val();
     const currentFortune = userData.fortune || 0;
-
+    
     if (currentFortune < amount) {
       throw new Error("Fonds insuffisants");
     }
@@ -151,15 +151,24 @@ export async function contributeToClub(
     }
     
     const currentContributions = club.members?.[userId]?.contributions || 0;
+    const newFortune = currentFortune - amount;
     
     const updates: { [path: string]: unknown } = {};
-    updates[`users/${userId}/fortune`] = currentFortune - amount;
+    updates[`users/${userId}/fortune`] = newFortune;
     updates[`clubs/${clubId}/treasury`] = (club.treasury || 0) + amount;
     updates[`clubs/${clubId}/members/${userId}/contributions`] = currentContributions + amount;
 
     await update(ref(database), updates);
     
     console.log(`✅ Contribution de ${amount}€ ajoutée au club ${clubId} par ${userId}`);
+    
+    // Historique de fortune
+    await addFortuneHistoryEntry(
+      userId,
+      newFortune,
+      -amount,
+      `Contribution club ${clubId}`
+    );
 
   } catch (error) {
     console.error("Erreur contribution club:", error);
@@ -303,7 +312,9 @@ export async function getFortuneHistory(
 
     return allEntries
       .filter(entry => entry.timestamp >= cutoff)
-      .sort((a, b) => b.timestamp - a.timestamp);
+      // Tri croissant (du plus ancien au plus récent) pour que
+      // history[0] = début de période et history[history.length-1] = fortune actuelle
+      .sort((a, b) => a.timestamp - b.timestamp);
   } catch (error) {
     console.error("Erreur lors de la récupération de l'historique de fortune:", error);
     return [];
@@ -339,8 +350,11 @@ export function onFortuneHistoryUpdate(
   return unsubscribe;
 }
 
+// 🔧 CORRECTIONS pour getUserSettings et getFriends
+// Remplacer les fonctions existantes dans firebaseExtended.ts
+
 // ============================
-// ⚙️ PARAMÈTRES UTILISATEUR
+// ⚙️ PARAMÈTRES UTILISATEUR - CORRIGÉ
 // ============================
 
 export interface UserSettings {
@@ -352,6 +366,7 @@ export interface UserSettings {
 
 export async function getUserSettings(userId: string): Promise<UserSettings> {
   try {
+    // ✅ FIX: Accès direct à users/{userId}/settings (pas userSettings)
     const settingsRef = ref(database, `users/${userId}/settings`);
     const snapshot = await get(settingsRef);
 
@@ -363,20 +378,36 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
     };
 
     if (!snapshot.exists()) {
-      await set(settingsRef, defaultSettings); 
+      // Créer les paramètres par défaut si inexistants
+      await set(settingsRef, defaultSettings);
       return defaultSettings;
     }
 
     const existingSettings = snapshot.val();
+    
+    // Vérifier la structure
+    if (!existingSettings.privacy) {
+      // Migrer l'ancienne structure si nécessaire
+      const migratedSettings = {
+        privacy: {
+          showStats: existingSettings.showStats !== false,
+          allowFriendRequests: existingSettings.allowFriendRequests !== false,
+        }
+      };
+      await set(settingsRef, migratedSettings);
+      return migratedSettings;
+    }
+
     return {
       privacy: {
-        ...defaultSettings.privacy,
-        ...existingSettings.privacy,
+        showStats: existingSettings.privacy.showStats !== false,
+        allowFriendRequests: existingSettings.privacy.allowFriendRequests !== false,
       },
     };
 
   } catch (error) {
     console.error("Erreur récupération paramètres utilisateur:", error);
+    // Retourner valeurs par défaut en cas d'erreur
     return {
       privacy: {
         showStats: true,
@@ -388,8 +419,10 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 
 export async function updateUserSettings(userId: string, settings: UserSettings): Promise<void> {
   try {
+    // ✅ FIX: Accès direct à users/{userId}/settings
     const settingsRef = ref(database, `users/${userId}/settings`);
-    await update(settingsRef, settings);
+    await set(settingsRef, settings);
+    console.log(`✅ Paramètres mis à jour pour ${userId}`);
   } catch (error) {
     console.error("Erreur mise à jour paramètres utilisateur:", error);
     throw new Error("Impossible de sauvegarder les paramètres.");
@@ -397,186 +430,277 @@ export async function updateUserSettings(userId: string, settings: UserSettings)
 }
 
 // ============================
-// 🤝 AMIS / UTILISATEURS
+// 🤝 AMIS / UTILISATEURS - CORRIGÉ
 // ============================
 
 export interface UserProfile {
-    id: string;
-    username: string;
-    role: "player" | "agent" | "admin";
-    eloRating: number;
-    wins: number;
-    losses: number;
-    fortune: number;
-    totalEarned: number;
-    createdAt: string;
-    clubId?: string;
+  id: string;
+  username: string;
+  role: "player" | "agent" | "admin";
+  eloRating: number;
+  wins: number;
+  losses: number;
+  fortune: number;
+  totalEarned: number;
+  createdAt: string;
+  clubId?: string;
 }
 
 export async function getFriends(userId: string): Promise<UserProfile[]> {
-    try {
-        const friendsRef = ref(database, `users/${userId}/friends`);
-        const snapshot = await get(friendsRef);
-        
-        if (!snapshot.exists()) return [];
-        
-        const friendIds = Object.keys(snapshot.val());
-        
-        const friendProfiles: UserProfile[] = [];
-        for (const friendId of friendIds) {
-            const userRef = ref(database, `users/${friendId}`);
-            const userSnapshot = await get(userRef);
-            if (userSnapshot.exists()) {
-                const user = userSnapshot.val();
-                friendProfiles.push({
-                    id: friendId,
-                    username: user.username,
-                    role: user.role || 'player',
-                    eloRating: user.eloRating || 1000,
-                    wins: user.wins || 0,
-                    losses: user.losses || 0,
-                    fortune: user.fortune || 0,
-                    totalEarned: user.totalEarned || 0,
-                    createdAt: user.createdAt || new Date().toISOString(),
-                    clubId: user.clubId,
-                });
-            }
-        }
-
-        return friendProfiles;
-    } catch (error) {
-        console.error("Erreur récupération amis:", error);
-        return [];
+  try {
+    // ✅ FIX: Accès direct à users/{userId}/friends
+    const friendsRef = ref(database, `users/${userId}/friends`);
+    const snapshot = await get(friendsRef);
+    
+    if (!snapshot.exists()) {
+      console.log(`Aucun ami trouvé pour ${userId}`);
+      return [];
     }
+    
+    const friendsData = snapshot.val();
+    
+    // Vérifier si c'est un objet avec des clés (IDs d'amis)
+    if (typeof friendsData !== 'object') {
+      console.log(`Structure friends invalide pour ${userId}`);
+      return [];
+    }
+    
+    const friendIds = Object.keys(friendsData);
+    console.log(`${friendIds.length} ami(s) trouvé(s) pour ${userId}`);
+    
+    const friendProfiles: UserProfile[] = [];
+    
+    for (const friendId of friendIds) {
+      try {
+        const userRef = ref(database, `users/${friendId}`);
+        const userSnapshot = await get(userRef);
+        
+        if (userSnapshot.exists()) {
+          const user = userSnapshot.val();
+          friendProfiles.push({
+            id: friendId,
+            username: user.username || "Joueur inconnu",
+            role: user.role || 'player',
+            eloRating: user.eloRating || user.eloGlobal || 1000,
+            wins: user.wins || 0,
+            losses: user.losses || 0,
+            fortune: user.fortune || 0,
+            totalEarned: user.totalEarned || 0,
+            createdAt: user.createdAt || new Date().toISOString(),
+            clubId: user.clubId,
+          });
+        } else {
+          console.warn(`Utilisateur ${friendId} introuvable (ami orphelin)`);
+        }
+      } catch (error) {
+        console.error(`Erreur chargement ami ${friendId}:`, error);
+      }
+    }
+
+    return friendProfiles;
+  } catch (error) {
+    console.error("Erreur récupération amis:", error);
+    // Ne pas throw, retourner tableau vide
+    return [];
+  }
 }
 
 export async function getPendingFriendRequests(userId: string): Promise<UserProfile[]> {
-    try {
-        const requestsRef = ref(database, `friendRequests/${userId}/received`);
-        const snapshot = await get(requestsRef);
+  try {
+    // Structure: friendRequests/{userId}/received/{senderId}
+    const requestsRef = ref(database, `friendRequests/${userId}/received`);
+    const snapshot = await get(requestsRef);
 
-        if (!snapshot.exists()) return [];
-
-        const senderIds = Object.keys(snapshot.val());
-        
-        const senderProfiles: UserProfile[] = [];
-        for (const senderId of senderIds) {
-            const userRef = ref(database, `users/${senderId}`);
-            const userSnapshot = await get(userRef);
-            if (userSnapshot.exists()) {
-                const user = userSnapshot.val();
-                senderProfiles.push({
-                    id: senderId,
-                    username: user.username,
-                    role: user.role || 'player',
-                    eloRating: user.eloRating || 1000,
-                    wins: user.wins || 0,
-                    losses: user.losses || 0,
-                    fortune: user.fortune || 0,
-                    totalEarned: user.totalEarned || 0,
-                    createdAt: user.createdAt || new Date().toISOString(),
-                    clubId: user.clubId,
-                });
-            }
-        }
-
-        return senderProfiles;
-    } catch (error) {
-        console.error("Erreur récupération demandes d'amis:", error);
-        return [];
+    if (!snapshot.exists()) {
+      console.log(`Aucune demande d'ami en attente pour ${userId}`);
+      return [];
     }
+
+    const requestsData = snapshot.val();
+    const senderIds = Object.keys(requestsData);
+    console.log(`${senderIds.length} demande(s) d'ami en attente pour ${userId}`);
+    
+    const senderProfiles: UserProfile[] = [];
+    
+    for (const senderId of senderIds) {
+      try {
+        const userRef = ref(database, `users/${senderId}`);
+        const userSnapshot = await get(userRef);
+        
+        if (userSnapshot.exists()) {
+          const user = userSnapshot.val();
+          senderProfiles.push({
+            id: senderId,
+            username: user.username || "Joueur inconnu",
+            role: user.role || 'player',
+            eloRating: user.eloRating || user.eloGlobal || 1000,
+            wins: user.wins || 0,
+            losses: user.losses || 0,
+            fortune: user.fortune || 0,
+            totalEarned: user.totalEarned || 0,
+            createdAt: user.createdAt || new Date().toISOString(),
+            clubId: user.clubId,
+          });
+        }
+      } catch (error) {
+        console.error(`Erreur chargement expéditeur ${senderId}:`, error);
+      }
+    }
+
+    return senderProfiles;
+  } catch (error) {
+    console.error("Erreur récupération demandes d'amis:", error);
+    return [];
+  }
 }
 
 export async function sendFriendRequest(senderId: string, receiverId: string): Promise<void> {
-    try {
-        const updates: { [path: string]: any } = {};
-        updates[`friendRequests/${senderId}/sent/${receiverId}`] = true;
-        updates[`friendRequests/${receiverId}/received/${senderId}`] = true;
-
-        await update(ref(database), updates);
-    } catch (error) {
-        console.error("Erreur envoi demande d'ami:", error);
-        throw new Error("Impossible d'envoyer la demande d'ami.");
+  try {
+    if (senderId === receiverId) {
+      throw new Error("Vous ne pouvez pas vous ajouter vous-même");
     }
+
+    // Vérifier si déjà amis
+    const friendsRef = ref(database, `users/${senderId}/friends/${receiverId}`);
+    const friendSnapshot = await get(friendsRef);
+    
+    if (friendSnapshot.exists()) {
+      throw new Error("Vous êtes déjà amis");
+    }
+
+    // Vérifier si demande déjà envoyée
+    const sentRef = ref(database, `friendRequests/${senderId}/sent/${receiverId}`);
+    const sentSnapshot = await get(sentRef);
+    
+    if (sentSnapshot.exists()) {
+      throw new Error("Demande déjà envoyée");
+    }
+
+    const updates: { [path: string]: any } = {};
+    updates[`friendRequests/${senderId}/sent/${receiverId}`] = { 
+      timestamp: Date.now(),
+      status: 'pending'
+    };
+    updates[`friendRequests/${receiverId}/received/${senderId}`] = { 
+      timestamp: Date.now(),
+      status: 'pending'
+    };
+
+    await update(ref(database), updates);
+    console.log(`✅ Demande d'ami envoyée: ${senderId} → ${receiverId}`);
+  } catch (error) {
+    console.error("Erreur envoi demande d'ami:", error);
+    throw error;
+  }
 }
 
 export async function acceptFriendRequest(userId: string, senderId: string): Promise<void> {
-    try {
-        const updates: { [path: string]: any } = {};
-        const timestamp = Date.now();
+  try {
+    const timestamp = Date.now();
+    
+    const updates: { [path: string]: any } = {};
+    
+    // Ajouter aux amis
+    updates[`users/${userId}/friends/${senderId}`] = { addedAt: timestamp };
+    updates[`users/${senderId}/friends/${userId}`] = { addedAt: timestamp };
+    
+    // Supprimer les demandes
+    updates[`friendRequests/${userId}/received/${senderId}`] = null;
+    updates[`friendRequests/${senderId}/sent/${userId}`] = null;
 
-        updates[`users/${userId}/friends/${senderId}`] = { addedAt: timestamp };
-        updates[`users/${senderId}/friends/${userId}`] = { addedAt: timestamp };
-        updates[`friendRequests/${userId}/received/${senderId}`] = null;
-        updates[`friendRequests/${senderId}/sent/${userId}`] = null;
-
-        await update(ref(database), updates);
-    } catch (error) {
-        console.error("Erreur acceptation demande d'ami:", error);
-        throw new Error("Impossible d'accepter la demande d'ami.");
-    }
+    await update(ref(database), updates);
+    console.log(`✅ Demande d'ami acceptée: ${userId} ↔ ${senderId}`);
+  } catch (error) {
+    console.error("Erreur acceptation demande d'ami:", error);
+    throw new Error("Impossible d'accepter la demande d'ami.");
+  }
 }
 
 export async function declineFriendRequest(userId: string, senderId: string): Promise<void> {
-    try {
-        const updates: { [path: string]: any } = {};
-        updates[`friendRequests/${userId}/received/${senderId}`] = null;
-        updates[`friendRequests/${senderId}/sent/${userId}`] = null;
+  try {
+    const updates: { [path: string]: any } = {};
+    updates[`friendRequests/${userId}/received/${senderId}`] = null;
+    updates[`friendRequests/${senderId}/sent/${userId}`] = null;
 
-        await update(ref(database), updates);
-    } catch (error) {
-        console.error("Erreur refus demande d'ami:", error);
-        throw new Error("Impossible de refuser la demande d'ami.");
-    }
+    await update(ref(database), updates);
+    console.log(`✅ Demande d'ami refusée: ${userId} ✗ ${senderId}`);
+  } catch (error) {
+    console.error("Erreur refus demande d'ami:", error);
+    throw new Error("Impossible de refuser la demande d'ami.");
+  }
 }
 
 export async function removeFriend(userId: string, friendId: string): Promise<void> {
-    try {
-        const updates: { [path: string]: any } = {};
-        updates[`users/${userId}/friends/${friendId}`] = null;
-        updates[`users/${friendId}/friends/${userId}`] = null;
+  try {
+    const updates: { [path: string]: any } = {};
+    updates[`users/${userId}/friends/${friendId}`] = null;
+    updates[`users/${friendId}/friends/${userId}`] = null;
 
-        await update(ref(database), updates);
-    } catch (error) {
-        console.error("Erreur suppression ami:", error);
-        throw new Error("Impossible de supprimer l'ami.");
-    }
+    await update(ref(database), updates);
+    console.log(`✅ Ami supprimé: ${userId} ✗ ${friendId}`);
+  } catch (error) {
+    console.error("Erreur suppression ami:", error);
+    throw new Error("Impossible de supprimer l'ami.");
+  }
 }
 
 export async function searchUsers(queryText: string): Promise<UserProfile[]> {
-    try {
-        const usersRef = ref(database, `users`);
-        const snapshot = await get(usersRef);
-
-        if (!snapshot.exists()) return [];
-
-        const allUsers = snapshot.val();
-        const lowerCaseQuery = queryText.toLowerCase();
-
-        const results: UserProfile[] = [];
-        Object.keys(allUsers).forEach(userId => {
-            const user = allUsers[userId];
-            if (user.username && user.username.toLowerCase().includes(lowerCaseQuery)) {
-                results.push({
-                    id: userId,
-                    username: user.username,
-                    role: user.role || 'player',
-                    eloRating: user.eloRating || 1000,
-                    wins: user.wins || 0,
-                    losses: user.losses || 0,
-                    fortune: user.fortune || 0,
-                    totalEarned: user.totalEarned || 0,
-                    createdAt: user.createdAt || new Date().toISOString(),
-                    clubId: user.clubId,
-                });
-            }
-        });
-
-        return results.slice(0, 10); 
-    } catch (error) {
-        console.error("Erreur recherche utilisateurs:", error);
-        return [];
+  try {
+    if (!queryText || queryText.trim().length < 2) {
+      return [];
     }
+
+    const usersRef = ref(database, `users`);
+    const snapshot = await get(usersRef);
+
+    if (!snapshot.exists()) {
+      return [];
+    }
+
+    const allUsers = snapshot.val();
+    const lowerCaseQuery = queryText.toLowerCase().trim();
+
+    const results: UserProfile[] = [];
+    
+    Object.keys(allUsers).forEach(userId => {
+      const user = allUsers[userId];
+      
+      // Ne pas inclure les utilisateurs sans username
+      if (!user.username) return;
+      
+      // Recherche par username
+      if (user.username.toLowerCase().includes(lowerCaseQuery)) {
+        results.push({
+          id: userId,
+          username: user.username,
+          role: user.role || 'player',
+          eloRating: user.eloRating || user.eloGlobal || 1000,
+          wins: user.wins || 0,
+          losses: user.losses || 0,
+          fortune: user.fortune || 0,
+          totalEarned: user.totalEarned || 0,
+          createdAt: user.createdAt || new Date().toISOString(),
+          clubId: user.clubId,
+        });
+      }
+    });
+
+    // Trier par pertinence (commence par la recherche d'abord)
+    results.sort((a, b) => {
+      const aStarts = a.username.toLowerCase().startsWith(lowerCaseQuery);
+      const bStarts = b.username.toLowerCase().startsWith(lowerCaseQuery);
+      
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+      
+      return a.username.localeCompare(b.username);
+    });
+
+    return results.slice(0, 20); // Limiter à 20 résultats
+  } catch (error) {
+    console.error("Erreur recherche utilisateurs:", error);
+    return [];
+  }
 }
 
 // ============================
@@ -796,7 +920,8 @@ export async function openLootbox(
     });
     
     const currentFortune = userData.fortune || 0;
-    updates.fortune = currentFortune + fortuneBonus;
+    const newFortune = currentFortune + fortuneBonus;
+    updates.fortune = newFortune;
     
     await update(userRef, updates);
     
@@ -805,6 +930,16 @@ export async function openLootbox(
       fortuneBonus,
       newItems: rewards.filter(r => r.isNew).length
     });
+    
+    // Historique de fortune
+    if (fortuneBonus !== 0) {
+      await addFortuneHistoryEntry(
+        userId,
+        newFortune,
+        fortuneBonus,
+        `Bonus lootbox: ${lootboxId}`
+      );
+    }
     
     return { rewards, fortuneBonus };
   } catch (error) {
@@ -836,9 +971,10 @@ export async function buyLootbox(
     const inventory = userData.inventory || {};
     
     const currentCount = getLootboxCount(inventory, lootboxId);
+    const newFortune = currentFortune - price;
     
     const updates: any = {
-      fortune: currentFortune - price,
+      fortune: newFortune,
       [`inventory/lootbox/${lootboxId}`]: currentCount + 1
     };
     
@@ -849,6 +985,14 @@ export async function buyLootbox(
     await update(userRef, updates);
     
     console.log(`✅ Lootbox ${lootboxId} achetée par ${userId} (total: ${currentCount + 1})`);
+    
+    // Historique de fortune
+    await addFortuneHistoryEntry(
+      userId,
+      newFortune,
+      -price,
+      `Achat lootbox: ${lootboxId}`
+    );
   } catch (error) {
     console.error("❌ Erreur lors de l'achat de la lootbox:", error);
     throw error;
@@ -926,6 +1070,240 @@ export async function getUserBadges(userId: string): Promise<Badge[]> {
 
 export async function checkAchievements(userId: string): Promise<void> {
   console.log(`[ACHIEVEMENTS] Vérification des succès pour l'utilisateur ${userId}...`);
+}
+
+// ============================
+// 🎯 DÉFIS JOURNALIERS / HEBDO
+// ============================
+
+export type ChallengeType = "daily" | "weekly";
+
+export interface UserChallenge {
+  id: string;
+  label: string;
+  description: string;
+  type: ChallengeType;
+  progress: number;
+  goal: number;
+  rewardFortune: number;
+  rewardTitleId?: string;
+  rewardBannerId?: string;
+  completed: boolean;
+  createdAt: number;
+  lastResetAt: number;
+}
+
+const DEFAULT_CHALLENGES: UserChallenge[] = [
+  {
+    id: "daily_play_matches",
+    label: "Jouer 3 matchs",
+    description: "Disputer 3 matchs aujourd'hui (tous modes confondus).",
+    type: "daily",
+    progress: 0,
+    goal: 3,
+    rewardFortune: 50,
+    completed: false,
+    createdAt: Date.now(),
+    lastResetAt: Date.now(),
+  },
+  {
+    id: "daily_win_match",
+    label: "Gagner 1 match",
+    description: "Remporter au moins 1 match aujourd'hui.",
+    type: "daily",
+    progress: 0,
+    goal: 1,
+    rewardFortune: 75,
+    completed: false,
+    createdAt: Date.now(),
+    lastResetAt: Date.now(),
+  },
+  {
+    id: "weekly_grind",
+    label: "Farmer la saison",
+    description: "Jouer 15 matchs cette semaine.",
+    type: "weekly",
+    progress: 0,
+    goal: 15,
+    rewardFortune: 300,
+    completed: false,
+    createdAt: Date.now(),
+    lastResetAt: Date.now(),
+  },
+  {
+    id: "weekly_babydex",
+    label: "Collectionneur BabyDex",
+    description: "Acheter ou ouvrir 5 cartes cette semaine.",
+    type: "weekly",
+    progress: 0,
+    goal: 5,
+    rewardFortune: 0,
+    rewardTitleId: "title_collector",
+    completed: false,
+    createdAt: Date.now(),
+    lastResetAt: Date.now(),
+  },
+];
+
+function isSameDay(ts: number, now: number): boolean {
+  const a = new Date(ts);
+  const b = new Date(now);
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function isSameISOWeek(ts: number, now: number): boolean {
+  const getISOWeek = (d: Date): { year: number; week: number } => {
+    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+    return { year: date.getUTCFullYear(), week: weekNo };
+  };
+
+  const a = getISOWeek(new Date(ts));
+  const b = getISOWeek(new Date(now));
+  return a.year === b.year && a.week === b.week;
+}
+
+export async function getUserChallenges(userId: string): Promise<UserChallenge[]> {
+  try {
+    const now = Date.now();
+    const challengesRef = ref(database, `userChallenges/${userId}`);
+    const snapshot = await get(challengesRef);
+
+    // Aucune donnée : on initialise avec les défis par défaut
+    if (!snapshot.exists()) {
+      const initial: { [id: string]: UserChallenge } = {};
+      DEFAULT_CHALLENGES.forEach((ch) => {
+        initial[ch.id] = { ...ch, createdAt: now, lastResetAt: now, progress: 0, completed: false };
+      });
+      await set(challengesRef, initial);
+      return Object.values(initial);
+    }
+
+    const raw = snapshot.val() as Record<string, UserChallenge>;
+    const updated: { [id: string]: UserChallenge } = { ...raw };
+
+    // S'assurer que tous les défis par défaut existent et gérer le reset journalier/hebdo
+    DEFAULT_CHALLENGES.forEach((template) => {
+      const existing = updated[template.id];
+      if (!existing) {
+        updated[template.id] = {
+          ...template,
+          createdAt: now,
+          lastResetAt: now,
+          progress: 0,
+          completed: false,
+        };
+        return;
+      }
+
+      const shouldReset =
+        (template.type === "daily" && !isSameDay(existing.lastResetAt, now)) ||
+        (template.type === "weekly" && !isSameISOWeek(existing.lastResetAt, now));
+
+      if (shouldReset) {
+        updated[template.id] = {
+          ...existing,
+          label: template.label,
+          description: template.description,
+          goal: template.goal,
+          rewardFortune: template.rewardFortune,
+          rewardTitleId: template.rewardTitleId,
+          rewardBannerId: template.rewardBannerId,
+          progress: 0,
+          completed: false,
+          lastResetAt: now,
+        };
+      }
+    });
+
+    // Persister les éventuelles mises à jour
+    await update(challengesRef, updated);
+
+    return Object.values(updated);
+  } catch (error) {
+    console.error("Erreur récupération défis:", error);
+    return [];
+  }
+}
+
+export async function claimChallengeReward(
+  userId: string,
+  challengeId: string
+): Promise<void> {
+  try {
+    const challengeRef = ref(database, `userChallenges/${userId}/${challengeId}`);
+    const challengeSnap = await get(challengeRef);
+    if (!challengeSnap.exists()) {
+      throw new Error("Défi introuvable");
+    }
+
+    const challenge = challengeSnap.val() as UserChallenge;
+    if (challenge.completed) {
+      throw new Error("Récompense déjà récupérée");
+    }
+
+    // Option simple : on considère que le joueur valide le défi quand il clique
+    const rootRef = ref(database);
+    const userRef = ref(database, `users/${userId}`);
+    const userSnap = await get(userRef);
+    if (!userSnap.exists()) {
+      throw new Error("Utilisateur introuvable");
+    }
+    const userData = userSnap.val();
+    const currentFortune = userData.fortune || 0;
+    const reward = challenge.rewardFortune || 0;
+    const newFortune = currentFortune + reward;
+
+    const updates: { [path: string]: any } = {};
+    updates[`users/${userId}/fortune`] = newFortune;
+    updates[`userChallenges/${userId}/${challengeId}/completed`] = true;
+    updates[`userChallenges/${userId}/${challengeId}/progress`] = challenge.goal;
+    updates[`userChallenges/${userId}/${challengeId}/lastResetAt`] = Date.now();
+
+    // Titres / bannières spéciaux offerts
+    if (challenge.rewardTitleId) {
+      const titleId = challenge.rewardTitleId;
+      if (!userData.inventory?.title || !userData.inventory.title[titleId]) {
+        updates[`users/${userId}/inventory/title/${titleId}`] = {
+          obtainedAt: Date.now(),
+          source: "challenge",
+        };
+      }
+    }
+
+    if (challenge.rewardBannerId) {
+      const bannerId = challenge.rewardBannerId;
+      if (!userData.inventory?.banner || !userData.inventory.banner[bannerId]) {
+        updates[`users/${userId}/inventory/banner/${bannerId}`] = {
+          obtainedAt: Date.now(),
+          source: "challenge",
+        };
+      }
+    }
+
+    await update(rootRef, updates);
+    
+    // Historique de fortune
+    if (reward !== 0) {
+      await addFortuneHistoryEntry(
+        userId,
+        newFortune,
+        reward,
+        `Récompense défi: ${challenge.label || challengeId}`
+      );
+    }
+    console.log(`✅ Défi ${challengeId} validé pour ${userId}`);
+  } catch (error) {
+    console.error("Erreur validation défi:", error);
+    throw error;
+  }
 }
 
 // ============================
@@ -1043,18 +1421,108 @@ const LOOTBOXES: ShopItem[] = [
   { id: "lootbox_mythic", name: "Coffre Mythique", description: "Cartes légendaires garanties", type: "lootbox", price: 2000, rarity: "mythic", icon: "✨" },
 ];
 
-// 📜 TITRES (10 items) - Titre affiché sous le pseudo
+// 📜 TITRES (10 items) - Style Rocket League FR
 const TITLES: ShopItem[] = [
-  { id: "title_newbie", name: "Débutant", description: "Titre de départ", type: "title", price: 0, rarity: "common", icon: "🆕", preview: "Débutant" },
-  { id: "title_veteran", name: "Vétéran", description: "Joueur expérimenté", type: "title", price: 300, rarity: "rare", icon: "🎖️", preview: "Vétéran" },
-  { id: "title_champion", name: "Champion", description: "Gagnant de tournois", type: "title", price: 500, rarity: "epic", icon: "🏆", preview: "Champion" },
-  { id: "title_legend", name: "Légende", description: "Légende vivante", type: "title", price: 800, rarity: "legendary", icon: "⭐", preview: "Légende" },
-  { id: "title_millionaire", name: "Millionnaire", description: "Fortune immense", type: "title", price: 1500, rarity: "legendary", icon: "💰", preview: "Millionnaire" },
-  { id: "title_godlike", name: "Divin", description: "Pouvoir suprême", type: "title", price: 2000, rarity: "mythic", icon: "👑", preview: "Divin" },
-  { id: "title_strategist", name: "Stratège", description: "Maître tacticien", type: "title", price: 600, rarity: "epic", icon: "🧠", preview: "Stratège" },
-  { id: "title_gambler", name: "Parieur Fou", description: "Risque tout", type: "title", price: 400, rarity: "rare", icon: "🎲", preview: "Parieur Fou" },
-  { id: "title_collector", name: "Collectionneur", description: "Toutes les cartes", type: "title", price: 1000, rarity: "legendary", icon: "🃏", preview: "Collectionneur" },
-  { id: "title_immortal", name: "Immortel", description: "Au-delà du temps", type: "title", price: 3000, rarity: "mythic", icon: "♾️", preview: "Immortel" },
+  {
+    id: "title_newbie",
+    name: "Bronze de Parking",
+    description: "Pour ceux qui découvrent encore le kick-off.",
+    type: "title",
+    price: 0,
+    rarity: "common",
+    icon: "🥉",
+    preview: "Bronze de Parking",
+  },
+  {
+    id: "title_veteran",
+    name: "Tryhard Platine",
+    description: "Toujours en ranked, jamais en freeplay.",
+    type: "title",
+    price: 300,
+    rarity: "rare",
+    icon: "💿",
+    preview: "Tryhard Platine",
+  },
+  {
+    id: "title_champion",
+    name: "Champion de Garage",
+    description: "Smurf ou génie incompris, on ne sait pas.",
+    type: "title",
+    price: 600,
+    rarity: "epic",
+    icon: "🏆",
+    preview: "Champion de Garage",
+  },
+  {
+    id: "title_legend",
+    name: "Légende du Reset",
+    description: "Flip, musty, breezi... tout y passe.",
+    type: "title",
+    price: 900,
+    rarity: "legendary",
+    icon: "✨",
+    preview: "Légende du Reset",
+  },
+  {
+    id: "title_millionaire",
+    name: "Marchand d’Octanes",
+    description: "RL Garage ouvert 24/7.",
+    type: "title",
+    price: 1200,
+    rarity: "legendary",
+    icon: "🚗",
+    preview: "Marchand d’Octanes",
+  },
+  {
+    id: "title_godlike",
+    name: "Insane Freestyler",
+    description: "Clip ou leave, jamais entre les deux.",
+    type: "title",
+    price: 2000,
+    rarity: "mythic",
+    icon: "🎥",
+    preview: "Insane Freestyler",
+  },
+  {
+    id: "title_strategist",
+    name: "Cerveau de la Rot",
+    description: "Toujours dernier, jamais dans le mur.",
+    type: "title",
+    price: 700,
+    rarity: "epic",
+    icon: "🧠",
+    preview: "Cerveau de la Rot",
+  },
+  {
+    id: "title_gambler",
+    name: "Démon de la SoloQ",
+    description: "3 mates tiltés, 0 problème.",
+    type: "title",
+    price: 500,
+    rarity: "rare",
+    icon: "😈",
+    preview: "Démon de la SoloQ",
+  },
+  {
+    id: "title_collector",
+    name: "Full White Dealer",
+    description: "Fennec, Octane, Interstellar… tout en titanium.",
+    type: "title",
+    price: 1600,
+    rarity: "legendary",
+    icon: "⚪",
+    preview: "Full White Dealer",
+  },
+  {
+    id: "title_immortal",
+    name: "Le Goat du Baby",
+    description: "Jamais AFK, jamais tilt, toujours clutch.",
+    type: "title",
+    price: 3000,
+    rarity: "mythic",
+    icon: "🐐",
+    preview: "Le GOAT du Baby",
+  },
 ];
 
 // 🎯 EXPORT DE TOUS LES ITEMS
@@ -1094,7 +1562,8 @@ export async function buyShopItem(
     }
 
     const updates: { [path: string]: any } = {};
-    updates[`users/${userId}/fortune`] = currentFortune - price;
+    const newFortune = currentFortune - price;
+    updates[`users/${userId}/fortune`] = newFortune;
     updates[`users/${userId}/inventory/${itemType}/${itemId}`] = { 
       obtainedAt: Date.now(),
       source: "shop",
@@ -1110,6 +1579,14 @@ export async function buyShopItem(
 
     await update(ref(database), updates);
 
+    // Historique de fortune
+    const shopItem = SHOP_ITEMS.find((i) => i.id === itemId);
+    await addFortuneHistoryEntry(
+      userId,
+      newFortune,
+      -price,
+      `Achat boutique: ${shopItem?.name || itemId}`
+    );
   } catch (error) {
     console.error("Erreur achat article:", error);
     throw error;

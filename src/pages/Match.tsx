@@ -15,7 +15,7 @@ const MatchPage = () => {
   const { user, userProfile } = useAuth();
   const navigate = useNavigate();
   const [isInQueue, setIsInQueue] = useState(false);
-  const [queuedPlayers, setQueuedPlayers] = useState<QueuePlayer[]>([]);
+  const [queuedPlayers, setQueuedPlayers] = useState<QueuedPlayer[]>([]);
   const [recentMatches, setRecentMatches] = useState<Match[]>([]);
   const [isLoadingQueue, setIsLoadingQueue] = useState(true);
   const [isLoadingMatches, setIsLoadingMatches] = useState(true);
@@ -153,7 +153,7 @@ const MatchPage = () => {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="mb-6 flex items-center justify-between"
+        className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3"
       >
         <div className="flex items-center gap-3">
           <div className="rounded-xl bg-primary/20 p-3">
@@ -165,12 +165,12 @@ const MatchPage = () => {
           </div>
         </div>
         
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
           {/* Bouton Enregistrer Match (accessible à tous) */}
           <Button 
             onClick={() => navigate("/record-match")}
             variant="outline"
-            className="gap-2"
+            className="gap-2 w-full sm:w-auto"
           >
             <Edit className="h-4 w-4" />
             Enregistrer Match
@@ -180,7 +180,7 @@ const MatchPage = () => {
           <Button 
             onClick={() => navigate("/betting")}
             variant="neon"
-            className="gap-2"
+            className="gap-2 w-full sm:w-auto"
           >
             <Plus className="h-4 w-4" />
             Match avec Paris

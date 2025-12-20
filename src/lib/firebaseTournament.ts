@@ -357,8 +357,8 @@ export async function validateOrganizerPermission(
   tournamentId: string = "active"
 ): Promise<boolean> {
   try {
-    // Admin = toujours autorisé
-    if (userRole === "admin") return true;
+    // Admin et agent = toujours autorisés
+    if (userRole === "admin" || userRole === "agent") return true;
 
     const tournamentRef = ref(database, `tournaments/${tournamentId}`);
     const snapshot = await get(tournamentRef);

@@ -14,11 +14,14 @@ import { toast } from "@/hooks/use-toast";
 interface UserProfile {
   username: string;
   eloRating: number;
+  elo1v1?: number;
+  elo2v2?: number;
+  eloGlobal?: number;
   wins: number;
   losses: number;
   fortune: number;
   totalEarned: number;
-  role: "admin" | "player";
+  role: "admin" | "agent" | "player";
   banned?: boolean;
   bannedAt?: string;
   createdAt: string;

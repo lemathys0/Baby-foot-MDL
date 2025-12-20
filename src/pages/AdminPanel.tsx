@@ -4,7 +4,8 @@ import {
   Shield, Users, Trophy, Coins, Settings, TrendingUp, 
   Loader2, AlertTriangle, Check, X, Plus, Trash2,
   UserPlus, DollarSign, Award, Zap, Clock, Target, Edit,
-  BarChart3, Activity, Ban, Gift, Calendar, Eye, Search
+  BarChart3, Activity, Ban, Gift, Calendar, Eye, Search,
+  MessageSquare, Send, Megaphone
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,13 +13,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { ref, get, update, remove, set } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
+import { sendAdminInfo } from "@/lib/firebaseChat";
 
 const AdminPanel = () => {
   const { user, userProfile } = useAuth();
@@ -46,6 +49,7 @@ const AdminPanel = () => {
   const [showFortuneDialog, setShowFortuneDialog] = useState(false);
   const [showBadgeDialog, setShowBadgeDialog] = useState(false);
   const [showMatchDialog, setShowMatchDialog] = useState(false);
+  const [showInfoMessageDialog, setShowInfoMessageDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [selectedMatch, setSelectedMatch] = useState<any>(null);
 
@@ -59,6 +63,8 @@ const AdminPanel = () => {
   const [fortuneAmount, setFortuneAmount] = useState("");
   const [fortuneAction, setFortuneAction] = useState<"add" | "remove">("add");
   const [selectedBadge, setSelectedBadge] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
+  const [isSendingInfo, setIsSendingInfo] = useState(false);
 
   const BADGES = [
     { id: "founder", name: "Fondateur", icon: "👑", color: "gold" },
@@ -142,7 +148,48 @@ const AdminPanel = () => {
     }
   };
 
-  const handleAddUser = async () => {
+  const handleSendInfoMessage = async () => {
+    if (!user || !userProfile || !infoMessage.trim()) {
+      toast({
+        title: "Erreur",
+        description: "Le message ne peut pas être vide",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (userProfile.role !== "admin") {
+      toast({
+        title: "Accès refusé",
+        description: "Seuls les administrateurs peuvent envoyer des messages d'info",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSendingInfo(true);
+    try {
+      await sendAdminInfo(user.uid, userProfile.username, infoMessage, userProfile.role);
+      
+      toast({
+        title: "📢 Message envoyé",
+        description: "Le message d'information a été diffusé à tous les joueurs",
+      });
+
+      setInfoMessage("");
+      setShowInfoMessageDialog(false);
+    } catch (error: any) {
+      console.error("Erreur envoi message info:", error);
+      toast({
+        title: "Erreur",
+        description: error.message || "Impossible d'envoyer le message",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingInfo(false);
+    }
+  };
+const handleAddUser = async () => {
     if (!newUserEmail || !newUserPassword || !newUserUsername) {
       toast({
         title: "Erreur",
@@ -562,8 +609,7 @@ const AdminPanel = () => {
     u.username?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     u.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
-
-  if (!userProfile) {
+if (!userProfile) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -620,10 +666,21 @@ const AdminPanel = () => {
                 <p className="text-xs sm:text-sm text-muted-foreground">Gestion complète</p>
               </div>
             </div>
-            <Button variant="outline" onClick={() => navigate('/')} size="sm">
-              <X className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
-              <span className="text-xs sm:text-sm">Retour</span>
-            </Button>
+            <div className="flex gap-2">
+              <Button 
+                variant="default" 
+                onClick={() => setShowInfoMessageDialog(true)}
+                size="sm"
+                className="bg-blue-600 hover:bg-blue-700"
+              >
+                <Megaphone className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Message Info</span>
+              </Button>
+              <Button variant="outline" onClick={() => navigate('/')} size="sm">
+                <X className="mr-1 sm:mr-2 h-3 w-3 sm:h-4 sm:w-4" />
+                <span className="text-xs sm:text-sm">Retour</span>
+              </Button>
+            </div>
           </div>
         </motion.div>
 
@@ -830,8 +887,7 @@ const AdminPanel = () => {
                 ))}
               </div>
             </TabsContent>
-
-            <TabsContent value="matches" className="space-y-3">
+<TabsContent value="matches" className="space-y-3">
               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                 <h2 className="text-sm sm:text-base font-bold">Matchs ({matches.length})</h2>
                 <Button
@@ -1035,11 +1091,92 @@ const AdminPanel = () => {
           </Tabs>
         </motion.div>
 
-        {/* DIALOGS */}
+        {/* DIALOG - Message d'Information */}
+        <Dialog open={showInfoMessageDialog} onOpenChange={setShowInfoMessageDialog}>
+          <DialogContent className="max-w-[95vw] sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="text-sm sm:text-base flex items-center gap-2">
+                <Megaphone className="h-5 w-5 text-blue-500" />
+                Envoyer un message d'information
+              </DialogTitle>
+              <DialogDescription>
+                Ce message sera diffusé à tous les joueurs dans le canal "📢 Informations Admin"
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 mt-4">
+              <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="h-4 w-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                  <div className="text-xs text-blue-700 dark:text-blue-300">
+                    <p className="font-medium mb-1">Conseils d'utilisation :</p>
+                    <ul className="list-disc list-inside space-y-1">
+                      <li>Utilisez pour les annonces importantes</li>
+                      <li>Maintenances, événements, mises à jour</li>
+                      <li>Tous les joueurs recevront la notification</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-2 block">Message</label>
+                <Textarea
+                  placeholder="Écrivez votre message d'information ici...&#10;&#10;Exemple :&#10;🎉 Nouveau tournoi ce week-end !&#10;Inscriptions ouvertes dès maintenant."
+                  value={infoMessage}
+                  onChange={(e) => setInfoMessage(e.target.value)}
+                  className="min-h-[150px] text-sm"
+                  maxLength={500}
+                />
+                <div className="flex justify-between items-center mt-1">
+                  <p className="text-xs text-muted-foreground">
+                    Maximum 500 caractères
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {infoMessage.length}/500
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowInfoMessageDialog(false);
+                    setInfoMessage("");
+                  }}
+                  className="flex-1"
+                  disabled={isSendingInfo}
+                >
+                  Annuler
+                </Button>
+                <Button
+                  onClick={handleSendInfoMessage}
+                  disabled={isSendingInfo || !infoMessage.trim()}
+                  className="flex-1 bg-blue-600 hover:bg-blue-700"
+                >
+                  {isSendingInfo ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Envoi...
+                    </>
+                  ) : (
+                    <>
+                      <Send className="mr-2 h-4 w-4" />
+                      Envoyer
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* DIALOGS - Autres */}
         <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
           <DialogContent className="max-w-[95vw] sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-sm sm:text-base">Ajouter utilisateur</DialogTitle>
+              <DialogDescription>Créez un nouveau compte utilisateur.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <Input 
@@ -1086,6 +1223,7 @@ const AdminPanel = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-sm sm:text-base">Modifier {selectedUser?.username}</DialogTitle>
+              <DialogDescription>Modifiez les informations de cet utilisateur.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div>
@@ -1130,6 +1268,7 @@ const AdminPanel = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-sm sm:text-base">Fortune - {selectedUser?.username}</DialogTitle>
+              <DialogDescription>Gérez la fortune de cet utilisateur.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <p className="text-xs sm:text-sm text-muted-foreground">
@@ -1174,6 +1313,7 @@ const AdminPanel = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-sm sm:text-base">Badge - {selectedUser?.username}</DialogTitle>
+              <DialogDescription>Ajoutez ou retirez des badges à cet utilisateur.</DialogDescription>
             </DialogHeader>
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2">
@@ -1205,6 +1345,7 @@ const AdminPanel = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-md">
             <DialogHeader>
               <DialogTitle className="text-sm sm:text-base">Détails du match</DialogTitle>
+              <DialogDescription>Consultez les détails complets de ce match.</DialogDescription>
             </DialogHeader>
             {selectedMatch && (
               <div className="space-y-3">

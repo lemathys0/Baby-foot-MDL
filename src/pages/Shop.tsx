@@ -79,6 +79,11 @@ const ShopPage = () => {
   const [sortBy, setSortBy] = useState<"price-asc" | "price-desc" | "rarity">("price-asc");
   const [showFilters, setShowFilters] = useState(false);
 
+  // Toujours arriver en haut de la page quand on ouvre la boutique
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
+
   useEffect(() => {
     if (!user) return;
 
