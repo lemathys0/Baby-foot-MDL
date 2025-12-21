@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { notifyAdminAnnouncement } from "@/lib/firebaseNotifications";
 import { notifyFortuneReceived } from "@/lib/firebaseNotifications";
 import { toast } from "@/hooks/use-toast";
 import { ref, get, onValue } from "firebase/database";
@@ -186,39 +187,52 @@ const Clubs = () => {
   }, [showJoinDialog, searchTerm]);
 
   const handleCreateClub = async () => {
-    if (!user || !userProfile) return;
-    if (!clubName.trim()) {
-      toast({
-        title: "Erreur",
-        description: "Veuillez entrer un nom de club",
-        variant: "destructive",
-      });
-      return;
-    }
+  if (!user || !userProfile) return;
+  if (!clubName.trim()) {
+    toast({
+      title: "Erreur",
+      description: "Veuillez entrer un nom de club",
+      variant: "destructive",
+    });
+    return;
+  }
 
-    try {
-      await createClub(user.uid, userProfile.username, clubName, selectedLogo, selectedColor);
-      
-      toast({
-        title: "Club créé! 🎉",
-        description: `${clubName} a été créé avec succès`,
-      });
+  try {
+    const clubId = await createClub(
+      user.uid, 
+      userProfile.username, 
+      clubName, 
+      selectedLogo, 
+      selectedColor
+    );
+    
+    // ✅ Notifier le fondateur
+    await notifyAdminAnnouncement(
+      user.uid,
+      "🏆 Club créé avec succès",
+      `Votre club "${clubName}" est maintenant actif. Invitez des membres !`
+    ).catch(error => {
+      console.error("Erreur notification création:", error);
+    });
+    
+    toast({
+      title: "Club créé! 🎉",
+      description: `${clubName} a été créé avec succès`,
+    });
 
-      setShowCreateDialog(false);
-      setClubName("");
-      setSelectedLogo(CLUB_LOGOS[0]);
-      setSelectedColor(CLUB_COLORS[0]);
-      
-      // Les données seront rechargées automatiquement via onValue
-    } catch (error: any) {
-      console.error("Erreur création club:", error);
-      toast({
-        title: "Erreur",
-        description: error.message || "Impossible de créer le club",
-        variant: "destructive",
-      });
-    }
-  };
+    setShowCreateDialog(false);
+    setClubName("");
+    setSelectedLogo(CLUB_LOGOS[0]);
+    setSelectedColor(CLUB_COLORS[0]);
+  } catch (error: any) {
+    console.error("Erreur création club:", error);
+    toast({
+      title: "Erreur",
+      description: error.message || "Impossible de créer le club",
+      variant: "destructive",
+    });
+  }
+};
 
   const handleJoinClub = async (clubId: string, clubName: string) => {
     if (!user || !userProfile) {
@@ -355,51 +369,58 @@ const Clubs = () => {
   };
 
   const handleBuyBonus = async (bonusId: string, cost: number) => {
-    if (!myClub) return;
+  if (!myClub || !user) return;
 
-    if ((myClub.treasury || 0) < cost) {
-      toast({
-        title: "Fonds insuffisants",
-        description: "La trésorerie du club est insuffisante",
-        variant: "destructive",
-      });
-      return;
-    }
+  if ((myClub.treasury || 0) < cost) {
+    toast({
+      title: "Fonds insuffisants",
+      description: "La trésorerie du club est insuffisante",
+      variant: "destructive",
+    });
+    return;
+  }
 
-    try {
-      await buyClubBonus(myClub.id, bonusId as any, cost);
+  try {
+    // 1. Acheter le bonus
+    await buyClubBonus(myClub.id, bonusId as any, cost);
+    
+    // 2. ✅ Notifier tous les membres du club
+    if (myClub.members) {
+      const bonusName = CLUB_BONUSES.find(b => b.id === bonusId)?.name || "Bonus";
+      const memberIds = Object.keys(myClub.members);
+      
+      const notificationPromises = memberIds.map(memberId => 
+        notifyAdminAnnouncement(
+          memberId,
+          "🎁 Nouveau bonus de club",
+          `Le bonus "${bonusName}" est maintenant actif pour tous les membres !`
+        ).catch(error => {
+          console.error(`Erreur notification pour ${memberId}:`, error);
+        })
+      );
+      
+      // Envoyer toutes les notifications
+      await Promise.allSettled(notificationPromises);
       
       toast({
-        title: "Bonus acheté! 🎁",
-        description: "Le bonus est maintenant actif pour tous les membres",
+        title: "Bonus acheté! 🎉",
+        description: `${memberIds.length} membre(s) notifié(s)`,
       });
-    } catch (error: any) {
-      console.error("Erreur achat bonus:", error);
+    } else {
       toast({
-        title: "Erreur",
-        description: error.message || "Impossible d'acheter le bonus",
-        variant: "destructive",
+        title: "Bonus acheté! 🎉",
+        description: "Le bonus est maintenant actif",
       });
-    } 
-    await buyClubBonus(myClub.id, bonusId as any, cost);
-
-// ✅ AJOUTER : Notifier tous les membres du club
-if (myClub.members) {
-  for (const memberId of Object.keys(myClub.members)) {
-    await notifyAdminAnnouncement(
-      memberId,
-      "Nouveau bonus de club",
-      `Le bonus "${CLUB_BONUSES.find(b => b.id === bonusId)?.name}" est maintenant actif !`
-    );
+    }
+  } catch (error: any) {
+    console.error("Erreur achat bonus:", error);
+    toast({
+      title: "Erreur",
+      description: error.message || "Impossible d'acheter le bonus",
+      variant: "destructive",
+    });
   }
-}
-
-toast({
-  title: "Bonus acheté! 🎁",
-  description: "Le bonus est maintenant actif pour tous les membres",
-});
-  };
-
+};
   // Fonction helper pour obtenir le nombre de membres
   const getMembersCount = (club: Club | null): number => {
     if (!club || !club.members) return 0;

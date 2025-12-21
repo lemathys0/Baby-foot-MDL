@@ -1,9 +1,9 @@
 // 📁 src/components/layout/AppLayout.tsx
-// Layout principal avec NotificationCenter intégré dans la navbar
+// Layout principal avec NotificationSystem intégré dans la navbar
 
 import { ReactNode } from "react";
 import { BottomNav } from "./BottomNav";
-import { NotificationCenter } from "@/components/NotificationCenter";
+import { NotificationSystem } from "@/components/NotificationSystem";
 import { Button } from "@/components/ui/button";
 import { Home, User, LogOut } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -40,7 +40,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
 
           <div className="flex items-center gap-2">
             {/* Centre de notifications */}
-            <NotificationCenter />
+            <NotificationSystem />
             
             <Button
               variant="ghost"

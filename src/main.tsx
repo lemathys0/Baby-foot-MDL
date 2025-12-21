@@ -19,35 +19,34 @@ createRoot(rootElement).render(
 );
 
 // ===========================
-// SERVICE WORKER REGISTRATION
+// 🔔 FIREBASE SERVICE WORKER (FCM + Cache + PWA)
 // ===========================
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
+    // ⚠️ IMPORTANT : Enregistrer firebase-messaging-sw.js pour FCM
     navigator.serviceWorker
-      .register("/sw.js", {
+      .register("/firebase-messaging-sw.js", {
         scope: "/",
-        updateViaCache: "none" // Force la vérification des mises à jour
+        updateViaCache: "none"
       })
       .then((registration) => {
-        console.log("✅ [App] Service Worker enregistré !", registration.scope);
+        console.log("✅ [FCM] Service Worker enregistré !", registration.scope);
         
         // Vérifier les mises à jour toutes les heures
         setInterval(() => {
           registration.update();
-          console.log("🔄 [App] Vérification de mise à jour SW...");
+          console.log("🔄 [FCM] Vérification de mise à jour SW...");
         }, 60 * 60 * 1000);
         
         // Gérer les mises à jour du SW
         registration.addEventListener("updatefound", () => {
           const newWorker = registration.installing;
-          console.log("🆕 [App] Nouvelle version du SW détectée !");
+          console.log("🆕 [FCM] Nouvelle version du SW détectée !");
           
           newWorker?.addEventListener("statechange", () => {
             if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              // Nouvelle version disponible
-              console.log("📢 [App] Nouvelle version disponible !");
+              console.log("📢 [FCM] Nouvelle version disponible !");
               
-              // Optionnel : Afficher une notification à l'utilisateur
               if (confirm("Une nouvelle version est disponible ! Voulez-vous recharger ?")) {
                 newWorker.postMessage({ type: "SKIP_WAITING" });
                 window.location.reload();
@@ -61,52 +60,37 @@ if ("serviceWorker" in navigator) {
         navigator.serviceWorker.addEventListener("controllerchange", () => {
           if (!refreshing) {
             refreshing = true;
-            console.log("🔄 [App] Nouveau SW actif, rechargement...");
+            console.log("🔄 [FCM] Nouveau SW actif, rechargement...");
             window.location.reload();
           }
         });
       })
       .catch((err) => {
-        console.error("❌ [App] Erreur d'enregistrement du Service Worker:", err);
+        console.error("❌ [FCM] Erreur d'enregistrement du Service Worker:", err);
       });
     
-    // Vérifier si on est en mode offline/online
+    // Événements réseau
     window.addEventListener("online", () => {
       console.log("🌐 [App] Connexion rétablie !");
-      // Optionnel : afficher une notification ou synchroniser les données
     });
     
     window.addEventListener("offline", () => {
       console.log("📡 [App] Mode hors ligne activé");
-      // Optionnel : afficher un message à l'utilisateur
     });
   });
 }
 
 // ===========================
-// FIREBASE CLOUD MESSAGING (Notifications Push)
+// 🔔 PERMISSION NOTIFICATIONS (géré par useNotifications)
 // ===========================
-if ("Notification" in window && "serviceWorker" in navigator) {
-  // Demander la permission pour les notifications
-  Notification.requestPermission().then((permission) => {
-    if (permission === "granted") {
-      console.log("✅ [App] Permission notifications accordée");
-      
-      // Initialiser FCM ici si nécessaire
-      // (À faire dans votre composant Firebase ou AuthContext)
-    } else {
-      console.log("⚠️ [App] Permission notifications refusée");
-    }
-  });
-}
+// La permission est demandée automatiquement par useNotifications.ts
+// Pas besoin de la demander ici pour éviter les doublons
 
 // ===========================
-// UTILITAIRES DE DEBUG (à retirer en production)
+// 🛠️ UTILITAIRES DE DEBUG (DEV uniquement)
 // ===========================
 if (import.meta.env.DEV) {
-  // Commandes utiles en développement
   (window as any).swDebug = {
-    // Vider tous les caches
     clearCache: async () => {
       const cacheNames = await caches.keys();
       await Promise.all(cacheNames.map(name => caches.delete(name)));
@@ -114,7 +98,6 @@ if (import.meta.env.DEV) {
       window.location.reload();
     },
     
-    // Obtenir la taille du cache
     getCacheSize: async () => {
       const cacheNames = await caches.keys();
       let total = 0;
@@ -128,7 +111,6 @@ if (import.meta.env.DEV) {
       return total;
     },
     
-    // Désinscrire le SW
     unregister: async () => {
       const registration = await navigator.serviceWorker.getRegistration();
       if (registration) {
@@ -139,7 +121,7 @@ if (import.meta.env.DEV) {
     }
   };
   
-  console.log("🛠️ Mode DEV : Utilisez window.swDebug pour déboguer le SW");
+  console.log("🛠️ Mode DEV : Utilisez window.swDebug pour déboguer");
   console.log("  - swDebug.clearCache()");
   console.log("  - swDebug.getCacheSize()");
   console.log("  - swDebug.unregister()");

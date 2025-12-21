@@ -8,9 +8,12 @@ import { Button } from "@/components/ui/button";
 import { getAppStats, onAppStatsUpdate, getRecentMatches, onRecentMatchesUpdate, Match, getQueuedPlayers, onQueueUpdate, QueuedPlayer } from "@/lib/firebaseSync";
 import { getCardStats } from "@/lib/firebaseCards";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTutorial } from "@/hooks/useTutorial";
+import TutorialOverlay from "@/components/TutorialOverlay";
+import SafeDailyBonusCard from "@/components/SafeDailyBonusCard";
 
 const Index = () => {
-  const { currentUser } = useAuth();
+  const { user } = useAuth();
   const [stats, setStats] = useState({
     totalPlayers: 0,
     averageElo: 0,
@@ -20,6 +23,13 @@ const Index = () => {
   const [queuedPlayers, setQueuedPlayers] = useState<QueuedPlayer[]>([]);
   const [cardStats, setCardStats] = useState({ totalCards: 0, uniqueCards: 48 });
   const [loading, setLoading] = useState(true);
+
+  // ✅ Hook tutoriel pour afficher automatiquement
+  const { showTutorial, completeTutorial, isLoading: tutorialLoading } = useTutorial(user?.uid);
+
+  useEffect(() => {
+    console.log("🏠 [Index] État tutoriel:", { showTutorial, user: user?.uid, tutorialLoading });
+  }, [showTutorial, user, tutorialLoading]);
 
   useEffect(() => {
     // Charger les stats initiales
@@ -36,8 +46,8 @@ const Index = () => {
         setQueuedPlayers(queue);
 
         // Charger les stats de cartes si l'utilisateur est connecté
-        if (currentUser) {
-          const cards = await getCardStats(currentUser.uid);
+        if (user) {
+          const cards = await getCardStats(user.uid);
           setCardStats(cards);
         }
       } catch (error) {
@@ -61,7 +71,7 @@ const Index = () => {
       unsubscribeMatches();
       unsubscribeQueue();
     };
-  }, [currentUser]);
+  }, [user]);
 
   const formatTimeAgo = (timestamp: number): string => {
     const now = Date.now();
@@ -92,7 +102,7 @@ const Index = () => {
     });
 
     // Ajouter une activité sur les cartes si disponible
-    if (currentUser && cardStats.uniqueCards > 0) {
+    if (user && cardStats.uniqueCards > 0) {
       activities.push({
         text: `${cardStats.uniqueCards} cartes uniques collectées`,
         time: "Collection",
@@ -103,7 +113,7 @@ const Index = () => {
     return activities.slice(0, 3);
   };
 
-  if (loading) {
+  if (loading || tutorialLoading) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -120,6 +130,14 @@ const Index = () => {
 
   return (
     <AppLayout>
+      {/* ✅ TUTORIEL AUTOMATIQUE */}
+      {showTutorial && user && (
+        <>
+          {console.log("🎓 [Index] Affichage du tutoriel")}
+          <TutorialOverlay onComplete={completeTutorial} />
+        </>
+      )}
+
       {/* Hero Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -140,6 +158,9 @@ const Index = () => {
           Compétition • Collection • Communauté
         </p>
       </motion.div>
+
+      {/* ✅ BONUS QUOTIDIEN */}
+      {user && <SafeDailyBonusCard />}
 
       {/* Quick Stats */}
       <motion.div
@@ -243,7 +264,7 @@ const Index = () => {
                 <div className="flex-1">
                   <h3 className="font-semibold text-foreground">BabyDex</h3>
                   <p className="text-sm text-muted-foreground">
-                    {currentUser 
+                    {user 
                       ? `${cardStats.uniqueCards}/${cardStats.uniqueCards} cartes collectées`
                       : "Collection de cartes"
                     }
@@ -276,7 +297,7 @@ const Index = () => {
                     </span>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    13h00 - 14h15 • Frais 50€
+                    13h00 - 14h15 • Frais 50₣
                   </p>
                 </div>
                 <Button 

@@ -7,7 +7,7 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { NotificationCenter } from "@/components/NotificationCenter";
+import { NotificationSystem } from "@/components/NotificationSystem";
 import { useNotifications } from "@/hooks/useNotifications";
 import Index from "./pages/Index";
 import Leaderboard from "./pages/Leaderboard";
@@ -66,7 +66,7 @@ const AppContent = () => {
       </Routes>
 
       {/* Centre de notifications (visible uniquement si connecté) */}
-      <NotificationCenter />
+      <NotificationSystem />
     </>
   );
 };

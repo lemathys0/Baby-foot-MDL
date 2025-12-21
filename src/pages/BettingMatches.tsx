@@ -6,7 +6,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { notifyBetResult } from "@/lib/firebaseNotifications";
+import { notifyBetResult, notifyAdminAnnouncement } from "@/lib/firebaseNotifications";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -120,36 +120,53 @@ const BettingMatches = () => {
   };
 
   const handleCreateMatch = async () => {
-    if (!user || team1Ids.length === 0 || team2Ids.length === 0) {
-      toast({
-        title: "Erreur",
-        description: "Sélectionnez au moins 1 joueur par équipe",
-        variant: "destructive"
-      });
-      return;
-    }
+  if (!user || team1Ids.length === 0 || team2Ids.length === 0) {
+    toast({
+      title: "Erreur",
+      description: "Sélectionnez au moins 1 joueur par équipe",
+      variant: "destructive"
+    });
+    return;
+  }
 
-    setIsCreating(true);
-    try {
-      await createMatchForBetting(team1Ids, team2Ids, user.uid);
-      toast({
-        title: "Match créé! 🎮",
-        description: "Les paris sont ouverts"
-      });
-      setShowCreateDialog(false);
-      setTeam1Ids([]);
-      setTeam2Ids([]);
-      loadData();
-    } catch (error: any) {
-      toast({
-        title: "Erreur",
-        description: error.message,
-        variant: "destructive"
-      });
-    } finally {
-      setIsCreating(false);
-    }
-  };
+  setIsCreating(true);
+  try {
+    const matchId = await createMatchForBetting(team1Ids, team2Ids, user.uid);
+    
+    // ✅ Notifier tous les joueurs du match
+    const allPlayerIds = [...team1Ids, ...team2Ids];
+    const notificationPromises = allPlayerIds.map(playerId => 
+      notifyAdminAnnouncement(
+        playerId,
+        "⚽ Nouveau match disponible",
+        "Un nouveau match est ouvert aux paris. Tentez votre chance !"
+      ).catch(error => {
+        console.error(`Erreur notification pour ${playerId}:`, error);
+      })
+    );
+    
+    await Promise.allSettled(notificationPromises);
+    
+    toast({
+      title: "Match créé! 🎮",
+      description: `${allPlayerIds.length} joueur(s) notifié(s)`,
+    });
+    
+    setShowCreateDialog(false);
+    setTeam1Ids([]);
+    setTeam2Ids([]);
+    loadData();
+  } catch (error: any) {
+    console.error("Erreur création match:", error);
+    toast({
+      title: "Erreur",
+      description: error.message || "Impossible de créer le match",
+      variant: "destructive"
+    });
+  } finally {
+    setIsCreating(false);
+  }
+};
 
   const handlePlaceBet = async (matchId: string, team: 1 | 2) => {
     if (!user || !userProfile) return;
@@ -200,54 +217,68 @@ const BettingMatches = () => {
   };
 
   const handleFinishMatch = async () => {
-    if (!finishDialogMatch) return;
-    
-    if (finalScore1 === finalScore2) {
-      toast({
-        title: "Erreur",
-        description: "Match nul interdit",
-        variant: "destructive"
-      });
-      return;
-    }
+  if (!finishDialogMatch) return;
+  
+  if (finalScore1 === finalScore2) {
+    toast({
+      title: "Erreur",
+      description: "Match nul interdit",
+      variant: "destructive"
+    });
+    return;
+  }
 
-    try {
-      const result = await finishMatch(finishDialogMatch, finalScore1, finalScore2);
+  try {
+    // 1. Terminer le match et calculer les gains
+    const result = await finishMatch(finishDialogMatch, finalScore1, finalScore2);
+    
+    // 2. ✅ Notifier tous les parieurs (gagnants et perdants)
+    if (result.winnings && Object.keys(result.winnings).length > 0) {
+      const notificationPromises = Object.entries(result.winnings).map(
+        ([userId, winnings]) => {
+          const amount = Math.abs(winnings as number);
+          const isWinner = (winnings as number) > 0;
+          
+          return notifyBetResult(userId, isWinner, amount).catch(error => {
+            console.error(`Erreur notification pour ${userId}:`, error);
+          });
+        }
+      );
+      
+      // Envoyer toutes les notifications
+      await Promise.allSettled(notificationPromises);
+      
+      const winnersCount = Object.values(result.winnings).filter(w => w > 0).length;
+      const losersCount = Object.keys(result.winnings).length - winnersCount;
       
       toast({
         title: "Match terminé! 🏆",
-        description: `${Object.keys(result.winnings).length} gagnants`
+        description: `${winnersCount} gagnant(s), ${losersCount} perdant(s) notifié(s)`,
       });
-      
-      setFinishDialogMatch(null);
-      setFinalScore1(0);
-      setFinalScore2(0);
-      loadData();
-      loadAgentFortune();
-    } catch (error: any) {
+    } else {
       toast({
-        title: "Erreur",
-        description: error.message,
-        variant: "destructive"
+        title: "Match terminé! 🏆",
+        description: "Aucun pari n'a été placé",
       });
     }
-    const result = await finishMatch(finishDialogMatch, finalScore1, finalScore2);
-
-// ✅ AJOUTER : Notifier les gagnants et perdants
-for (const [userId, winnings] of Object.entries(result.winnings)) {
-  const isWinner = winnings > 0;
-  await notifyBetResult(
-    userId,
-    isWinner,
-    Math.abs(winnings as number)
-  );
-}
-
-toast({
-  title: "Match terminé! 🏆",
-  description: `${Object.keys(result.winnings).length} gagnants`,
-});
-  };
+    
+    // 3. Réinitialiser le dialogue
+    setFinishDialogMatch(null);
+    setFinalScore1(0);
+    setFinalScore2(0);
+    
+    // 4. Recharger les données
+    await loadData();
+    await loadAgentFortune();
+  } catch (error: any) {
+    console.error("Erreur fin de match:", error);
+    toast({
+      title: "Erreur",
+      description: error.message || "Impossible de terminer le match",
+      variant: "destructive"
+    });
+  }
+};
 
   const togglePlayer = (playerId: string, team: 1 | 2) => {
     const ids1 = team === 1 ? team1Ids : team2Ids;
@@ -268,17 +299,27 @@ toast({
 
   // ✅ FIX: Nouvelle formule de calcul des cotes basée sur la distribution proportionnelle
   const calculateOdds = (match: MatchWithBetting) => {
-    const total = match.totalBetsTeam1 + match.totalBetsTeam2;
-    const clamp = (v: number) => Math.max(v, 1.1); // cote mini 1.10
-    
-    // Si aucune mise, cotes par défaut
-    if (total === 0) return { odds1: "2.00", odds2: "2.00" };
-    
-    const rawOdds1 = match.totalBetsTeam1 === 0 ? total : total / match.totalBetsTeam1;
-    const rawOdds2 = match.totalBetsTeam2 === 0 ? total : total / match.totalBetsTeam2;
-    
-    return { odds1: clamp(rawOdds1).toFixed(2), odds2: clamp(rawOdds2).toFixed(2) };
+  const total = match.totalBetsTeam1 + match.totalBetsTeam2;
+  
+  // Si aucune mise, cotes par défaut
+  if (total === 0) return { odds1: "2.00", odds2: "2.00" };
+  
+  // Calcul brut des cotes
+  const rawOdds1 = match.totalBetsTeam1 === 0 ? total : total / match.totalBetsTeam1;
+  const rawOdds2 = match.totalBetsTeam2 === 0 ? total : total / match.totalBetsTeam2;
+  
+  // ✅ APPLICATION DU MINIMUM 1.10x
+  const finalOdds1 = Math.max(rawOdds1, 1.10);
+  const finalOdds2 = Math.max(rawOdds2, 1.10);
+  
+  console.log(`📊 [COTES] Équipe 1: brut=${rawOdds1.toFixed(2)}, final=${finalOdds1.toFixed(2)}`);
+  console.log(`📊 [COTES] Équipe 2: brut=${rawOdds2.toFixed(2)}, final=${finalOdds2.toFixed(2)}`);
+  
+  return { 
+    odds1: finalOdds1.toFixed(2), 
+    odds2: finalOdds2.toFixed(2) 
   };
+};
 
 // ✅ EXPLICATION DU SYSTÈME:
 // 

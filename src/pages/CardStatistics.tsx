@@ -1,4 +1,4 @@
-// 📁 src/pages/CardStatistics.tsx
+// 📄 src/pages/CardStatistics.tsx
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -32,57 +32,71 @@ const CardStatistics = () => {
   const [recentSearches, setRecentSearches] = useState<MarketStats[]>([]);
 
   const handleSearch = async () => {
-  const input = searchCode.trim().toLowerCase();
-  if (!input) {
-    toast({ title: "Erreur", description: "Veuillez entrer un nom ou un code." });
-    return;
-  }
-
-  setIsLoading(true);
-  try {
-    let targetCode = "";
-
-    // 1. On cherche si c'est un code exact
-    const directCard = getCardByCode(input.toUpperCase());
-    if (directCard.found) {
-      targetCode = directCard.code;
-    } else {
-      // 2. Sinon, on cherche par nom dans toutes les saisons
-      for (const season of Object.keys(codeToCardMap)) {
-        const cards = codeToCardMap[season];
-        const foundCode = Object.keys(cards).find(code => {
-          const nomSansExtension = cards[code].nom.toLowerCase().replace('.png', '');
-          return nomSansExtension.includes(input) || cards[code].nom.toLowerCase().includes(input);
-        });
-        
-        if (foundCode) {
-          targetCode = foundCode;
-          break; // On prend la première correspondance
-        }
-      }
-    }
-
-    if (!targetCode) {
-      toast({ title: "Non trouvé", description: "Aucune carte ne correspond à ce nom ou code." });
+    const input = searchCode.trim().toLowerCase();
+    console.log("🔍 Recherche pour:", input);
+    
+    if (!input) {
+      toast({ title: "Erreur", description: "Veuillez entrer un nom ou un code." });
       return;
     }
 
-    // 3. Récupération des stats via le code trouvé
-    const stats = await getMarketStats(targetCode);
-    if (stats) {
-      setSelectedStats(stats);
-      if (!recentSearches.find(s => s.cardCode === stats.cardCode)) {
-        setRecentSearches(prev => [stats, ...prev].slice(0, 5));
+    setIsLoading(true);
+    try {
+      let targetCode = "";
+
+      // 1. On cherche si c'est un code exact
+      const directCard = getCardByCode(input.toUpperCase());
+      console.log("📇 Carte directe trouvée:", directCard);
+      
+      if (directCard.found) {
+        targetCode = directCard.code;
+      } else {
+        // 2. Sinon, on cherche par nom dans toutes les saisons
+        console.log("🔎 Recherche par nom dans codeToCardMap...");
+        for (const season of Object.keys(codeToCardMap)) {
+          const cards = codeToCardMap[season];
+          const foundCode = Object.keys(cards).find(code => {
+            const nomSansExtension = cards[code].nom.toLowerCase().replace('.png', '');
+            return nomSansExtension.includes(input) || cards[code].nom.toLowerCase().includes(input);
+          });
+          
+          if (foundCode) {
+            targetCode = foundCode;
+            console.log("✅ Code trouvé:", foundCode, "dans la saison:", season);
+            break;
+          }
+        }
       }
-    } else {
-      toast({ title: "Aucune donnée", description: "Cette carte n'a pas encore de transactions enregistrées." });
+
+      console.log("🎯 Code cible final:", targetCode);
+
+      if (!targetCode) {
+        toast({ title: "Non trouvé", description: "Aucune carte ne correspond à ce nom ou code." });
+        return;
+      }
+
+      // 3. Récupération des stats via le code trouvé
+      console.log("📊 Appel getMarketStats pour:", targetCode);
+      const stats = await getMarketStats(targetCode);
+      console.log("📈 Stats récupérées:", stats);
+      console.log("💰 Prix history:", stats?.priceHistory);
+      
+      if (stats) {
+        setSelectedStats(stats);
+        if (!recentSearches.find(s => s.cardCode === stats.cardCode)) {
+          setRecentSearches(prev => [stats, ...prev].slice(0, 5));
+        }
+      } else {
+        console.log("❌ Aucune stats retournée");
+        toast({ title: "Aucune donnée", description: "Cette carte n'a pas encore de transactions enregistrées." });
+      }
+    } catch (error) {
+      console.error("❌ Erreur lors de la recherche:", error);
+      toast({ title: "Erreur", description: "Erreur lors de la recherche." });
+    } finally {
+      setIsLoading(false);
     }
-  } catch (error) {
-    toast({ title: "Erreur", description: "Erreur lors de la recherche." });
-  } finally {
-    setIsLoading(false);
-  }
-};
+  };
 
   const getPriceChange = (history: Array<{ date: number; price: number }>) => {
     if (history.length < 2) return null;
@@ -99,46 +113,145 @@ const CardStatistics = () => {
   };
 
   const PriceHistoryChart = ({ history }: { history: Array<{ date: number; price: number }> }) => {
-    if (history.length === 0) return null;
-
-    const maxPrice = Math.max(...history.map((h) => h.price));
-    const minPrice = Math.min(...history.map((h) => h.price));
-    const range = maxPrice - minPrice || 1;
-
+  if (!history || history.length === 0) {
     return (
-      <div className="space-y-3">
-        <div className="flex items-end gap-1 h-32 bg-muted/50 rounded-lg p-4">
-          {history.map((item, i) => {
-            const height = ((item.price - minPrice) / range) * 100;
-            const isRecent = i === history.length - 1;
-            
-            return (
-              <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                <div
-                  className={`w-full rounded-t transition-all ${
-                    isRecent
-                      ? "bg-gradient-to-t from-green-600 to-green-400"
-                      : "bg-gradient-to-t from-purple-600 to-purple-400"
-                  }`}
-                  style={{ height: `${Math.max(height, 10)}%` }}
-                  title={`${item.price}€`}
-                />
-                <span className="text-[8px] text-muted-foreground">
-                  {new Date(item.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-        
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>Min: {minPrice}€</span>
-          <span>Max: {maxPrice}€</span>
-        </div>
+      <div className="h-48 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Aucun historique disponible</p>
       </div>
     );
-  };
+  }
 
+  const validHistory = history.filter(h => h && typeof h.price === 'number' && h.price > 0);
+  
+  if (validHistory.length === 0) {
+    return (
+      <div className="h-48 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
+        <p className="text-sm text-muted-foreground">Données invalides</p>
+      </div>
+    );
+  }
+
+  const maxPrice = Math.max(...validHistory.map(p => p.price));
+  const minPrice = Math.min(...validHistory.map(p => p.price));
+  const range = maxPrice - minPrice || 1;
+  const avgPrice = validHistory.reduce((sum, h) => sum + h.price, 0) / validHistory.length;
+
+  return (
+    <div className="space-y-3">
+      {/* Graphique en courbe SVG */}
+      <div className="relative h-48 bg-gradient-to-b from-muted/30 to-muted/50 rounded-lg p-4 overflow-hidden">
+        <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
+          {/* Grille de fond */}
+          <defs>
+            <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+              <path d="M 20 0 L 0 0 0 20" fill="none" stroke="currentColor" strokeOpacity="0.1" strokeWidth="0.5"/>
+            </pattern>
+            <linearGradient id="areaGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+              <stop offset="0%" stopColor="rgb(168, 85, 247)" stopOpacity="0.4"/>
+              <stop offset="100%" stopColor="rgb(168, 85, 247)" stopOpacity="0.05"/>
+            </linearGradient>
+          </defs>
+          
+          <rect width="100" height="100" fill="url(#grid)"/>
+          
+          {/* Points et ligne */}
+          {validHistory.map((item, i) => {
+            const x = validHistory.length > 1 ? (i / (validHistory.length - 1)) * 100 : 50;
+            const y = 100 - ((item.price - minPrice) / range) * 100;
+            const isRecent = i === validHistory.length - 1;
+            
+            return (
+              <g key={i}>
+                {/* Ligne vers le point précédent */}
+                {i > 0 && (
+                  <line
+                    x1={(i - 1) / (validHistory.length - 1) * 100}
+                    y1={100 - ((validHistory[i - 1].price - minPrice) / range) * 100}
+                    x2={x}
+                    y2={y}
+                    stroke="rgb(168, 85, 247)"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  />
+                )}
+                
+                {/* Point */}
+                <circle
+                  cx={x}
+                  cy={y}
+                  r={isRecent ? "3" : "2"}
+                  fill={isRecent ? "rgb(34, 197, 94)" : "rgb(168, 85, 247)"}
+                  className="drop-shadow-md"
+                />
+                
+                {/* Animation pour le point récent */}
+                {isRecent && (
+                  <circle
+                    cx={x}
+                    cy={y}
+                    r="3"
+                    fill="none"
+                    stroke="rgb(34, 197, 94)"
+                    strokeWidth="1"
+                    opacity="0.5"
+                  >
+                    <animate
+                      attributeName="r"
+                      from="3"
+                      to="8"
+                      dur="1.5s"
+                      repeatCount="indefinite"
+                    />
+                    <animate
+                      attributeName="opacity"
+                      from="0.5"
+                      to="0"
+                      dur="1.5s"
+                      repeatCount="indefinite"
+                    />
+                  </circle>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        
+        {/* Labels des dates */}
+        <div className="absolute bottom-2 left-4 right-4 flex justify-between text-[10px] text-muted-foreground">
+          {validHistory.map((item, i) => {
+            if (i === 0 || i === validHistory.length - 1) {
+              return (
+                <span key={i}>
+                  {new Date(item.date).toLocaleDateString("fr-FR", {
+                    day: "2-digit",
+                    month: "short",
+                  })}
+                </span>
+              );
+            }
+            return null;
+          })}
+        </div>
+      </div>
+      
+      {/* Statistiques */}
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="bg-green-500/10 rounded-lg p-2 text-center border border-green-500/20">
+          <p className="text-muted-foreground mb-1">Min</p>
+          <p className="font-bold text-green-600">{minPrice}€</p>
+        </div>
+        <div className="bg-purple-500/10 rounded-lg p-2 text-center border border-purple-500/20">
+          <p className="text-muted-foreground mb-1">Moyenne</p>
+          <p className="font-bold text-purple-600">{avgPrice.toFixed(2)}€</p>
+        </div>
+        <div className="bg-red-500/10 rounded-lg p-2 text-center border border-red-500/20">
+          <p className="text-muted-foreground mb-1">Max</p>
+          <p className="font-bold text-red-600">{maxPrice}€</p>
+        </div>
+      </div>
+    </div>
+  );
+};
   const StatsCard = ({ stats }: { stats: MarketStats }) => {
     const priceChange = getPriceChange(stats.priceHistory);
     

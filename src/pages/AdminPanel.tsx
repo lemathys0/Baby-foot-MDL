@@ -10,6 +10,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { AntiCheatTab } from "@/components/admin/AntiCheatTab";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -745,7 +746,11 @@ if (!userProfile) {
                 <Users className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
                 <span className="hidden sm:inline">Users</span>
               </TabsTrigger>
-              <TabsTrigger value="matches" className="text-xs sm:text-sm px-2 py-1.5">
+              <TabsTrigger value="anticheat" className="text-xs sm:text-sm px-2 py-1.5">
+              <Shield className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Anti-Cheat</span>
+            </TabsTrigger>
+                  <TabsTrigger value="matches" className="text-xs sm:text-sm px-2 py-1.5">
                 <Trophy className="h-3 w-3 sm:h-4 sm:w-4 sm:mr-1" />
                 <span className="hidden sm:inline">Matchs</span>
               </TabsTrigger>
@@ -965,6 +970,9 @@ if (!userProfile) {
                 )}
               </div>
             </TabsContent>
+            <TabsContent value="anticheat" className="space-y-3">
+  <AntiCheatTab />
+</TabsContent>
 
             <TabsContent value="stats" className="space-y-3">
               <h2 className="text-sm sm:text-base font-bold">Statistiques</h2>

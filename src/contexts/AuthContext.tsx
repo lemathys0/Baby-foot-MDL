@@ -25,6 +25,7 @@ interface UserProfile {
   banned?: boolean;
   bannedAt?: string;
   createdAt: string;
+  hasSeenTutorial?: boolean;
 }
 
 interface AuthContextType {
@@ -32,7 +33,7 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<{ error: string | null }>;
-  signup: (email: string, password: string, username: string) => Promise<{ error: string | null }>;
+  signup: (email: string, password: string, username: string) => Promise<{ error: string | null; userId?: string }>;
   logout: () => Promise<void>;
 }
 
@@ -63,9 +64,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (snapshot.exists()) {
         const profile = snapshot.val() as UserProfile;
         
-        // ✅ FIX: Vérifier si l'utilisateur est banni
+        // ✅ Vérifier si l'utilisateur est banni
         if (profile.banned === true) {
-          // Déconnecter automatiquement l'utilisateur banni
           await signOut(auth);
           
           toast({
@@ -92,7 +92,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setUser(currentUser);
       
       if (currentUser) {
-        // Defer profile fetch to avoid deadlock
         setTimeout(() => {
           fetchUserProfile(currentUser.uid);
         }, 0);
@@ -112,7 +111,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const uid = userCredential.user.uid;
       
-      // ✅ FIX: Vérifier immédiatement si l'utilisateur est banni
+      // ✅ Vérifier immédiatement si l'utilisateur est banni
       const profileRef = ref(database, `users/${uid}`);
       const snapshot = await get(profileRef);
       
@@ -120,7 +119,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         const profile = snapshot.val() as UserProfile;
         
         if (profile.banned === true) {
-          // Déconnecter immédiatement
           await signOut(auth);
           
           return { 
@@ -158,20 +156,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
   };
 
-  // Signup function
+  // ✅ Signup function - retourne userId
   const signup = async (
     email: string,
     password: string,
     username: string
-  ): Promise<{ error: string | null }> => {
+  ): Promise<{ error: string | null; userId?: string }> => {
     try {
+      console.log("📝 Création du compte pour:", email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const newUser = userCredential.user;
 
       // Update display name
       await updateProfile(newUser, { displayName: username });
 
-      // Create user profile in database
+      // ✅ Create user profile in database avec hasSeenTutorial: false
       const newProfile: UserProfile = {
         username,
         eloRating: 1000,
@@ -181,14 +180,27 @@ export function AuthProvider({ children }: AuthProviderProps) {
         totalEarned: 0,
         role: "player",
         banned: false,
+        hasSeenTutorial: false, // ✅ Important pour le tutoriel
         createdAt: new Date().toISOString(),
       };
 
-      await set(ref(database, `users/${newUser.uid}`), newProfile);
+      const createdAtTimestamp = Date.now();
+      
+      await set(ref(database, `users/${newUser.uid}`), {
+        ...newProfile,
+        createdAt: createdAtTimestamp,
+        lastBonusClaim: createdAtTimestamp, // ✅ Initialiser le bonus quotidien
+        totalDailyBonus: 0,
+        dailyBonusStreak: 0,
+      });
       setUserProfile(newProfile);
 
-      return { error: null };
+      console.log("✅ Profil créé avec succès pour:", newUser.uid);
+
+      return { error: null, userId: newUser.uid };
     } catch (error: any) {
+      console.error("❌ Erreur inscription:", error);
+      
       let errorMessage = "Une erreur est survenue lors de l'inscription.";
       
       switch (error.code) {

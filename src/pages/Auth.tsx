@@ -8,6 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { z } from "zod";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
+import TutorialOverlay from "@/components/TutorialOverlay";
+import { ref, update } from "firebase/database";
+import { database } from "@/lib/firebase";
 
 // Validation schemas
 const loginSchema = z.object({
@@ -40,18 +43,33 @@ const Auth = () => {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [resetSuccess, setResetSuccess] = useState(false);
+  
+  // ✅ État pour le tutoriel après inscription
+  const [showTutorialAfterSignup, setShowTutorialAfterSignup] = useState(false);
 
   const { user, login, signup } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Redirect if already logged in
+  // Debug: surveiller les changements d'état
   useEffect(() => {
-    if (user) {
+    console.log("🎯 État mis à jour:");
+    console.log("  - user:", user?.uid);
+    console.log("  - showTutorialAfterSignup:", showTutorialAfterSignup);
+  }, [user, showTutorialAfterSignup]);
+
+  // Redirect if already logged in (sauf si tutoriel en cours)
+  useEffect(() => {
+    console.log("🔄 useEffect redirection - user:", user?.uid, "showTutorial:", showTutorialAfterSignup);
+    
+    if (user && !showTutorialAfterSignup) {
+      console.log("➡️ Redirection vers accueil");
       const from = location.state?.from?.pathname || "/";
       navigate(from, { replace: true });
+    } else if (user && showTutorialAfterSignup) {
+      console.log("⏸️ Redirection bloquée (tutoriel en cours)");
     }
-  }, [user, navigate, location]);
+  }, [user, navigate, location, showTutorialAfterSignup]);
 
   const resetForm = () => {
     setEmail("");
@@ -70,6 +88,8 @@ const Auth = () => {
     setError(null);
     setValidationErrors({});
 
+    console.log("🔵 handleSubmit - Début, isLogin:", isLogin);
+
     // Validate form
     try {
       if (isLogin) {
@@ -86,6 +106,7 @@ const Auth = () => {
           }
         });
         setValidationErrors(errors);
+        console.log("❌ Erreurs de validation:", errors);
         return;
       }
     }
@@ -94,21 +115,38 @@ const Auth = () => {
 
     try {
       if (isLogin) {
+        console.log("🔑 Tentative de connexion...");
         const result = await login(email, password);
         if (result.error) {
+          console.log("❌ Erreur de connexion:", result.error);
           setError(result.error);
+        } else {
+          console.log("✅ Connexion réussie");
         }
       } else {
+        console.log("📝 Tentative d'inscription...");
         const result = await signup(email, password, username);
+        console.log("📊 Résultat inscription:", result);
+        
         if (result.error) {
+          console.log("❌ Erreur d'inscription:", result.error);
           setError(result.error);
+        } else if (result.userId) {
+          console.log("✅ Inscription réussie! UserId:", result.userId);
+          console.log("🎓 Activation du tutoriel...");
+          setShowTutorialAfterSignup(true);
+          console.log("🎓 État showTutorialAfterSignup:", true);
+        } else {
+          console.log("⚠️ Inscription réussie mais pas de userId retourné");
         }
       }
+    } catch (error) {
+      console.error("💥 Erreur inattendue:", error);
     } finally {
       setIsLoading(false);
+      console.log("🔵 handleSubmit - Fin");
     }
   };
-
 
   const toggleMode = () => {
     setIsLogin(!isLogin);
@@ -143,8 +181,59 @@ const Auth = () => {
     }
   };
 
+  // ✅ Fonction pour compléter le tutoriel
+  const handleCompleteTutorial = async () => {
+    if (!user?.uid) {
+      console.error("❌ Pas d'utilisateur connecté");
+      return;
+    }
+
+    try {
+      console.log("✅ Marquage du tutoriel comme complété pour:", user.uid);
+      const userRef = ref(database, `users/${user.uid}`);
+      await update(userRef, {
+        hasSeenTutorial: true,
+        tutorialCompletedAt: Date.now(),
+      });
+      
+      setShowTutorialAfterSignup(false);
+      navigate("/");
+    } catch (error) {
+      console.error("❌ Erreur completion tutoriel:", error);
+      // Même en cas d'erreur, on navigue vers l'accueil
+      setShowTutorialAfterSignup(false);
+      navigate("/");
+    }
+  };
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      {/* ✅ TUTORIEL APRÈS INSCRIPTION */}
+      {(() => {
+        console.log("🎨 Rendu - showTutorialAfterSignup:", showTutorialAfterSignup);
+        console.log("🎨 Rendu - user:", user?.uid);
+        return null;
+      })()}
+      
+      {showTutorialAfterSignup && user && (
+        <>
+          {console.log("🎓 AFFICHAGE DU TUTORIEL CONFIRMÉ")}
+          <TutorialOverlay onComplete={handleCompleteTutorial} />
+        </>
+      )}
+
+      {showTutorialAfterSignup && !user && (
+        <>
+          {console.log("⚠️ showTutorialAfterSignup=true MAIS user=null")}
+        </>
+      )}
+
+      {!showTutorialAfterSignup && (
+        <>
+          {console.log("ℹ️ Tutoriel non affiché (showTutorialAfterSignup=false)")}
+        </>
+      )}
+
       {/* Background Effects */}
       <div className="absolute inset-0 overflow-hidden">
         <div className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full bg-primary/5 blur-3xl" />
@@ -173,7 +262,6 @@ const Auth = () => {
             Baby-Foot <span className="text-primary text-glow-cyan">App</span>
           </h1>
         </motion.div>
-
 
         <Card className="border-border/50 bg-card/80 backdrop-blur-xl">
           <CardHeader className="text-center">

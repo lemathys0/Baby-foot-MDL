@@ -15,7 +15,9 @@ import { BadgesSection } from "@/components/profile/BadgesSection";
 import { 
   notifyOfferReceived,
   notifyOfferAccepted,
-  notifyOfferRejected 
+  notifyOfferRejected,
+  notifyOfferCountered,
+  notifyAdminAnnouncement
 } from "@/lib/firebaseNotifications";
 import { FortuneHistoryCard } from "@/components/profile/FortuneHistoryCard";
 import { ClubCard } from "@/components/profile/ClubCard";
@@ -293,7 +295,6 @@ const TaxInfoCard = ({ userId, fortune, bettingGains }: TaxInfoCardProps) => {
     </Card>
   );
 };
-
 const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: any }) => {
   const getItemDetails = (itemId: string): ShopItem | null => {
     return SHOP_ITEMS.find(item => item.id === itemId) || null;
@@ -427,6 +428,7 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
     </Card>
   );
 };
+
 const RecentMatchesCard = ({ userId }: { userId: string }) => {
   const [matches, setMatches] = useState<
     Array<{
@@ -616,8 +618,8 @@ const FeaturedCardsCard = ({ cards }: { cards: Record<string, number> }) => {
     </Card>
   );
 };
-
 const MyOffersSection = ({ userId }: { userId: string }) => {
+  const { userProfile } = useAuth();
   const [receivedOffers, setReceivedOffers] = useState<Offer[]>([]);
   const [sentOffers, setSentOffers] = useState<Offer[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -649,64 +651,110 @@ const MyOffersSection = ({ userId }: { userId: string }) => {
   const handleAccept = async (offerId: string) => {
     setActionId(offerId);
     try {
+      const offer = receivedOffers.find(o => o.id === offerId);
+      
       await acceptOffer(userId, offerId);
-      toast({ title: "Offre acceptée ✅", description: "La transaction a été effectuée." });
+      
+      if (offer) {
+        await notifyOfferAccepted(
+          offer.buyerId,
+          userProfile?.username || "Un vendeur",
+          offer.listingId
+        ).catch(error => {
+          console.error("Erreur notification:", error);
+        });
+      }
+      
+      toast({ 
+        title: "Offre acceptée ✅", 
+        description: "La transaction a été effectuée et l'acheteur a été notifié." 
+      });
+      
       await loadOffers();
     } catch (error: any) {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ 
+        title: "Erreur", 
+        description: error.message, 
+        variant: "destructive" 
+      });
     } finally {
       setActionId(null);
     }
-    const offer = receivedOffers.find(o => o.id === offerId);
-if (offer) {
-  await notifyOfferAccepted(
-    offer.buyerId,
-    userProfile?.username || "Un vendeur",
-    offer.listingId // ou le nom de la carte si disponible
-  );
-}
-
-toast({
-  title: "Offre acceptée ✅",
-  description: "La transaction a été effectuée.",
-});
   };
 
   const handleReject = async (offerId: string) => {
     setActionId(offerId);
     try {
+      const offer = receivedOffers.find(o => o.id === offerId);
+      
       await rejectOffer(userId, offerId);
-      toast({ title: "Offre rejetée", description: "L'acheteur a été notifié." });
+      
+      if (offer) {
+        await notifyOfferRejected(
+          offer.buyerId,
+          userProfile?.username || "Un vendeur",
+          offer.listingId
+        ).catch(error => {
+          console.error("Erreur notification:", error);
+        });
+      }
+      
+      toast({ 
+        title: "Offre rejetée", 
+        description: "L'acheteur a été notifié." 
+      });
+      
       await loadOffers();
     } catch (error: any) {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({ 
+        title: "Erreur", 
+        description: error.message, 
+        variant: "destructive" 
+      });
     } finally {
       setActionId(null);
     }
-    const offer = receivedOffers.find(o => o.id === offerId);
-if (offer) {
-  await notifyOfferRejected(
-    offer.buyerId,
-    userProfile?.username || "Un vendeur",
-    offer.listingId
-  );
-}
-
-toast({
-  title: "Offre rejetée",
-  description: "L'acheteur a été notifié.",
-});
   };
 
   const handleSendCounter = async () => {
-    if (!selectedOffer) return;
+    if (!selectedOffer || !counterAmount) return;
+    
+    const amount = parseFloat(counterAmount);
+    if (isNaN(amount) || amount <= 0) {
+      toast({ 
+        title: "Erreur", 
+        description: "Montant invalide", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
     try {
-      await counterOffer(userId, selectedOffer.id, Number(counterAmount));
-      toast({ title: "Contre-offre envoyée ✅" });
+      await counterOffer(userId, selectedOffer.id, amount);
+      
+      await notifyOfferCountered(
+        selectedOffer.buyerId,
+        userProfile?.username || "Un vendeur",
+        amount,
+        selectedOffer.listingId
+      ).catch(error => {
+        console.error("Erreur notification:", error);
+      });
+      
+      toast({
+        title: "Contre-offre envoyée ✅",
+        description: `Proposition de ${amount}€ envoyée à l'acheteur`,
+      });
+      
       setShowCounterDialog(false);
+      setCounterAmount("");
       await loadOffers();
     } catch (error: any) {
-      toast({ title: "Erreur", description: error.message, variant: "destructive" });
+      toast({
+        title: "Erreur",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 
@@ -989,10 +1037,6 @@ toast({
     </>
   );
 };
-// Remplacez la fonction CardStatsSection dans Profile.tsx par celle-ci :
-
-// 📌 Remplacez la fonction CardStatsSection dans Profile.tsx par celle-ci :
-
 const CardStatsSection = () => {
   const [searchCode, setSearchCode] = useState("");
   const [stats, setStats] = useState<MarketStats | null>(null);
@@ -1001,6 +1045,8 @@ const CardStatsSection = () => {
 
   const handleSearch = async () => {
     const input = searchCode.trim().toLowerCase();
+    console.log("🔍 [Profile] Recherche pour:", input);
+    
     if (!input) {
       toast({ 
         title: "Erreur", 
@@ -1014,15 +1060,14 @@ const CardStatsSection = () => {
     try {
       let targetCode = "";
 
-      // ✅ 1. Chercher si c'est un code exact (insensible à la casse)
-      const { getCardByCode } = await import("@/lib/cardSystem");
+      const { getCardByCode, codeToCardMap } = await import("@/lib/cardSystem");
       const directCard = getCardByCode(input.toUpperCase());
+      console.log("📇 [Profile] Carte directe trouvée:", directCard);
       
       if (directCard && directCard.found) {
         targetCode = directCard.code;
       } else {
-        // ✅ 2. Sinon, chercher par nom dans toutes les saisons
-        const { codeToCardMap } = await import("@/lib/cardSystem");
+        console.log("🔎 [Profile] Recherche par nom dans codeToCardMap...");
         let foundCode: string | null = null;
         
         for (const season of Object.keys(codeToCardMap)) {
@@ -1032,15 +1077,18 @@ const CardStatsSection = () => {
               .toLowerCase()
               .replace(/\.(png|jpg|jpeg|gif)$/i, '');
             
-            // ✅ Recherche partielle : "lilwe" trouvera "Lilwenn"
             return nomSansExtension.includes(input) || 
                    cards[code].nom.toLowerCase().includes(input);
           }) || null;
           
-          if (foundCode) break;
+          if (foundCode) {
+            console.log("✅ [Profile] Code trouvé:", foundCode, "dans la saison:", season);
+            break;
+          }
         }
         
         if (!foundCode) {
+          console.log("❌ [Profile] Aucune carte trouvée pour:", input);
           toast({ 
             title: "Non trouvé", 
             description: `Aucune carte ne correspond à "${searchCode}". Vérifiez l'orthographe.`,
@@ -1053,8 +1101,12 @@ const CardStatsSection = () => {
         targetCode = foundCode;
       }
 
-      // ✅ 3. Récupération des stats via le code trouvé
+      console.log("🎯 [Profile] Code cible final:", targetCode);
+      console.log("📊 [Profile] Appel getMarketStats pour:", targetCode);
+      
       const result = await getMarketStats(targetCode);
+      console.log("📈 [Profile] Stats récupérées:", result);
+      console.log("💰 [Profile] Prix history:", result?.priceHistory);
       
       if (!result) {
         toast({ 
@@ -1066,7 +1118,6 @@ const CardStatsSection = () => {
       } else {
         setStats(result);
         
-        // ✅ Ajouter aux recherches récentes (sans doublons)
         setRecentSearches((prev) => {
           const filtered = prev.filter((s) => s.cardCode !== result.cardCode);
           return [result, ...filtered].slice(0, 3);
@@ -1078,7 +1129,7 @@ const CardStatsSection = () => {
         });
       }
     } catch (error: any) {
-      console.error("❌ Erreur recherche stats:", error);
+      console.error("❌ [Profile] Erreur recherche stats:", error);
       toast({ 
         title: "Erreur", 
         description: error.message || "Impossible de charger les statistiques.", 
@@ -1098,6 +1149,70 @@ const CardStatsSection = () => {
       percentage: Math.abs(change).toFixed(1),
       isIncrease: change > 0,
     };
+  };
+
+  const PriceHistoryChart = ({ history }: { history: Array<{ date: number; price: number }> }) => {
+    console.log("📊 [Profile] PriceHistoryChart appelé avec:", history);
+    
+    if (!history || history.length === 0) {
+      return (
+        <div className="h-32 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
+          <p className="text-sm text-muted-foreground">Aucun historique disponible</p>
+        </div>
+      );
+    }
+
+    const validHistory = history.filter(h => h && typeof h.price === 'number' && h.price > 0);
+    console.log("✅ [Profile] Historique valide filtré:", validHistory);
+    
+    if (validHistory.length === 0) {
+      return (
+        <div className="h-32 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
+          <p className="text-sm text-muted-foreground">Données invalides</p>
+        </div>
+      );
+    }
+
+    const maxPrice = Math.max(...validHistory.map((p) => p.price));
+    const minPrice = Math.min(...validHistory.map((p) => p.price));
+    const range = maxPrice - minPrice || 1;
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-end gap-1 h-32 bg-muted/50 rounded-lg p-4">
+          {validHistory.map((item, i) => {
+            const height = ((item.price - minPrice) / range) * 100;
+            const isRecent = i === validHistory.length - 1;
+
+            return (
+              <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div
+                  className={`w-full rounded-t transition-all ${
+                    isRecent
+                      ? "bg-gradient-to-t from-green-600 to-green-400"
+                      : "bg-gradient-to-t from-purple-600 to-purple-400"
+                  }`}
+                  style={{ height: `${Math.max(height, 10)}%` }}
+                  title={`${item.price}€`}
+                />
+                <span className="text-[8px] text-muted-foreground">
+                  {new Date(item.date).toLocaleDateString("fr-FR", {
+                    day: "2-digit",
+                    month: "short",
+                  })}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        
+        <div className="flex justify-between text-xs text-muted-foreground">
+          <span>Min: {minPrice}€</span>
+          <span>Max: {maxPrice}€</span>
+          <span>Moyenne: {(validHistory.reduce((sum, h) => sum + h.price, 0) / validHistory.length).toFixed(2)}€</span>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1224,35 +1339,7 @@ const CardStatsSection = () => {
                 <BarChart3 className="h-4 w-4" />
                 Historique des Prix
               </h3>
-              <div className="flex items-end gap-1 h-32 bg-muted/50 rounded-lg p-4">
-                {stats.priceHistory.map((item, i) => {
-                  const maxPrice = Math.max(...stats.priceHistory.map((p) => p.price));
-                  const minPrice = Math.min(...stats.priceHistory.map((p) => p.price));
-                  const range = maxPrice - minPrice || 1;
-                  const height = ((item.price - minPrice) / range) * 100;
-                  const isRecent = i === stats.priceHistory.length - 1;
-
-                  return (
-                    <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                      <div
-                        className={`w-full rounded-t transition-all ${
-                          isRecent
-                            ? "bg-gradient-to-t from-green-600 to-green-400"
-                            : "bg-gradient-to-t from-purple-600 to-purple-400"
-                        }`}
-                        style={{ height: `${Math.max(height, 10)}%` }}
-                        title={`${item.price}€`}
-                      />
-                      <span className="text-[8px] text-muted-foreground">
-                        {new Date(item.date).toLocaleDateString("fr-FR", {
-                          day: "2-digit",
-                          month: "short",
-                        })}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
+              <PriceHistoryChart history={stats.priceHistory} />
             </div>
 
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
@@ -1305,21 +1392,26 @@ const CardStatsSection = () => {
   );
 };
 const Profile = () => {
-  const { user, userProfile, logout } = useAuth();
   const navigate = useNavigate();
-  const [showNotifications, setShowNotifications] = useState(false);
+  const { user, userProfile, logout } = useAuth();
   const [showSettings, setShowSettings] = useState(false);
+  const [showNotifications, setShowNotifications] = useState(false);
   const [showFriends, setShowFriends] = useState(false);
-  const [showPrivacy, setShowPrivacy] = useState(false);
   const [showAddFriend, setShowAddFriend] = useState(false);
-  const [selectedFriend, setSelectedFriend] = useState<{id: string, username: string} | null>(null);
+  const [showPrivacy, setShowPrivacy] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<Friend>>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
+  const [isSendingRequest, setIsSendingRequest] = useState<string | null>(null);
+  const [selectedFriend, setSelectedFriend] = useState<{ id: string; username: string } | null>(null);
   const [settings, setSettings] = useState<UserSettings | null>(null);
-  const [searchResults, setSearchResults] = useState<Friend[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [agentData, setAgentData] = useState<{ 
-    fortune: number; 
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [activeTab, setActiveTab] = useState<"overview" | "stats" | "club" | "offers" | "market">("overview");
+  
+  const [agentData, setAgentData] = useState<{
+    fortune: number;
     bettingGains: number;
     equipped: {
       avatar: string;
@@ -1328,28 +1420,16 @@ const Profile = () => {
       title: string;
       effect: string;
     };
-    inventory: Record<string, unknown>;
+    inventory: any;
     cards: Record<string, number>;
-  }>({ 
-    fortune: 0, 
+  }>({
+    fortune: 0,
     bettingGains: 0,
     equipped: { avatar: "", theme: "", banner: "", title: "", effect: "" },
     inventory: {},
     cards: {},
   });
-  const [isLoadingFriends, setIsLoadingFriends] = useState(false);
-  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
-  const [isLoadingAgent, setIsLoadingAgent] = useState(true);
-  const [isSendingRequest, setIsSendingRequest] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<"overview" | "stats" | "club" | "offers" | "market">("overview");
-
-  const profileData = userProfile || { 
-    username: user?.displayName || "Joueur", 
-    role: "player" as const, 
-    eloRating: 1000, 
-    wins: 0, 
-    losses: 0 
-  };
+  const [isLoadingAgent, setIsLoadingAgent] = useState(false);
 
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
@@ -1537,6 +1617,24 @@ const Profile = () => {
     } catch (error: any) {
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     }
+  };
+
+  if (!user || !userProfile) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center min-h-[50vh]">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  const profileData = userProfile || { 
+    username: user?.displayName || "Joueur", 
+    role: "player" as const, 
+    eloRating: 1000, 
+    wins: 0, 
+    losses: 0 
   };
 
   return (
@@ -1744,7 +1842,8 @@ const Profile = () => {
         </Card>
       </motion.div>
 
-      {/* Dialogs pour notifications, paramètres, amis, etc. - identiques à l'original */}
+      {/* DIALOGS - À ajouter juste avant </AppLayout> dans la partie 5 */}
+      
       <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent>
           <DialogHeader>
@@ -2167,3 +2266,4 @@ const Profile = () => {
 };
 
 export default Profile;
+

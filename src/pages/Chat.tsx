@@ -110,6 +110,7 @@ const ChatComponent = () => {
     }
   };
 
+  // ✅ CORRIGÉ: handleSendMessage avec notifications intégrées
   const handleSendMessage = async () => {
     if (!selectedChat || !user || !userProfile || !messageText.trim()) return;
 
@@ -125,9 +126,33 @@ const ChatComponent = () => {
 
     setIsSending(true);
     try {
+      // 1. Envoyer le message
       await sendMessage(selectedChat.id, user.uid, userProfile.username, messageText);
+      
+      // 2. ✅ Notifier tous les membres du chat (sauf l'expéditeur)
+      const chatMembers = Array.isArray(selectedChat.m) ? selectedChat.m : [];
+      const notificationPromises = chatMembers
+        .filter(memberId => memberId !== user.uid)
+        .map(memberId => 
+          notifyNewMessage(
+            memberId,
+            userProfile.username,
+            messageText.substring(0, 50) + (messageText.length > 50 ? "..." : ""),
+            selectedChat.id
+          ).catch(error => {
+            console.error(`❌ Erreur notification pour ${memberId}:`, error);
+          })
+        );
+      
+      // Envoyer toutes les notifications en parallèle (sans bloquer l'UI)
+      await Promise.allSettled(notificationPromises);
+      
+      // 3. Réinitialiser le champ de texte
       setMessageText("");
+      
+      console.log(`✅ Message envoyé avec ${notificationPromises.length} notification(s)`);
     } catch (error: any) {
+      console.error("❌ Erreur envoi message:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible d'envoyer le message",
@@ -136,22 +161,6 @@ const ChatComponent = () => {
     } finally {
       setIsSending(false);
     }
-    await sendMessage(selectedChat.id, user.uid, userProfile.username, messageText);
-
-// ✅ AJOUTER : Notifier tous les membres du chat (sauf l'expéditeur)
-const chatMembers = selectedChat.m || [];
-for (const memberId of chatMembers) {
-  if (memberId !== user.uid) {
-    await notifyNewMessage(
-      memberId,
-      userProfile.username,
-      messageText.substring(0, 50) + (messageText.length > 50 ? "..." : ""),
-      selectedChat.id
-    );
-  }
-}
-
-setMessageText("");
   };
 
   const handleSearchUsers = async (query: string) => {
@@ -304,16 +313,15 @@ setMessageText("");
   };
 
   const getChatDisplayName = (chat: Chat): string => {
-  if (chat.t === "admin_info") return "📢 Infos Admin";
-  if (chat.t === "group") return chat.n || "Groupe sans nom";
-  if (chat.mn && user) {
-    // S'assurer que chat.m est un tableau avant d'utiliser .find()
-    const members = Array.isArray(chat.m) ? chat.m : [];
-    const otherUserId = members.find(id => id !== user.uid);
-    return otherUserId ? (chat.mn[otherUserId] || "Utilisateur") : "Chat privé";
-  }
-  return "Chat privé";
-};
+    if (chat.t === "admin_info") return "📢 Infos Admin";
+    if (chat.t === "group") return chat.n || "Groupe sans nom";
+    if (chat.mn && user) {
+      const members = Array.isArray(chat.m) ? chat.m : [];
+      const otherUserId = members.find(id => id !== user.uid);
+      return otherUserId ? (chat.mn[otherUserId] || "Utilisateur") : "Chat privé";
+    }
+    return "Chat privé";
+  };
 
   const getChatIcon = (chat: Chat) => {
     if (chat.id === "admin_info") return <Info className="h-3 w-3 md:h-4 md:w-4 text-blue-500 flex-shrink-0" />;

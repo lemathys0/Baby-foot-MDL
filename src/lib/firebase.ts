@@ -20,8 +20,9 @@ const app = initializeApp(firebaseConfig);
 
 // Initialize Firebase Authentication and get a reference to the service
 export const auth = getAuth(app);
-
+export const VAPID_KEY = "BAJ02eLWbYkPyz_w3S304RHeltRnL-5l7T9to_ruWiLDjJor9rmc7YEZ_xvGj27TCkIwtxDecQ8JopCIVAmrGvw";
 // Initialize Realtime Database and get a reference to the service
 export const database = getDatabase(app);
 export const messaging = getMessaging(app);
 export default app;
+

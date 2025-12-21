@@ -1,80 +1,86 @@
-// 📁 src/hooks/useNotifications.ts
-// Hook personnalisé pour initialiser et gérer les notifications
-
-import { useEffect, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { 
-  initializeNotifications, 
-  requestNotificationPermission 
-} from '@/lib/firebaseNotifications';
-import { Messaging } from 'firebase/messaging';
+import { requestNotificationPermission, listenToForegroundMessages } from '@/lib/fcm';
 import { toast } from '@/hooks/use-toast';
 
 export const useNotifications = () => {
   const { user } = useAuth();
-  const [messaging, setMessaging] = useState<Messaging | null>(null);
-  const [permissionGranted, setPermissionGranted] = useState(false);
-  const [isInitialized, setIsInitialized] = useState(false);
+  const initialized = useRef(false); // ✅ Empêche la double initialisation
+  const listenerConfigured = useRef(false); // ✅ Empêche les listeners multiples
 
   useEffect(() => {
-    if (!user || isInitialized) return;
-
-    const initNotifications = async () => {
-      try {
-        console.log('🔔 Initialisation des notifications pour:', user.uid);
-
-        // Vérifier si le navigateur supporte les notifications
-        if (!('Notification' in window)) {
-          console.warn('⚠️ Les notifications ne sont pas supportées par ce navigateur');
-          return;
+    if (!user) {
+      console.log("⚠️ [useNotifications] Pas d'utilisateur connecté");
+      return;
+    }
+    
+    // ✅ Si déjà initialisé, on ne fait rien
+    if (initialized.current) {
+      console.log("⏭️ [useNotifications] Déjà initialisé, skip");
+      return;
+    }
+    
+    initialized.current = true;
+    console.log("🔔 [useNotifications] Initialisation pour:", user.uid);
+    
+    // 1️⃣ Initialiser FCM selon la permission actuelle
+    const initFCM = async () => {
+      const currentPermission = Notification.permission;
+      console.log("📱 [useNotifications] Permission actuelle:", currentPermission);
+      
+      if (currentPermission === 'granted') {
+        // Permission déjà accordée, récupérer le token silencieusement
+        console.log("✅ [useNotifications] Permission déjà accordée, récupération du token...");
+        const token = await requestNotificationPermission(user.uid);
+        
+        if (token) {
+          console.log('✅ [useNotifications] FCM réactivé avec succès');
         }
-
-        // Vérifier la permission actuelle
-        if (Notification.permission === 'granted') {
-          setPermissionGranted(true);
-          
-          // Initialiser Firebase Messaging
-          const msg = await initializeNotifications(user.uid);
-          
-          if (msg) {
-            setMessaging(msg);
-            setIsInitialized(true);
-            console.log('✅ Notifications initialisées avec succès');
-          }
-        } else if (Notification.permission === 'default') {
-          // Demander la permission après un délai (meilleure UX)
-          setTimeout(async () => {
-            const granted = await requestNotificationPermission();
-            
-            if (granted) {
-              setPermissionGranted(true);
-              const msg = await initializeNotifications(user.uid);
-              
-              if (msg) {
-                setMessaging(msg);
-                setIsInitialized(true);
-                
-                toast({
-                  title: "🔔 Notifications activées",
-                  description: "Vous recevrez désormais des notifications pour vos matchs, paris et messages.",
-                });
-              }
-            }
-          }, 3000); // Attendre 3 secondes après le chargement
+      } else if (currentPermission === 'default') {
+        // Première fois : demander immédiatement
+        console.log("🚀 [useNotifications] Demande de permission (première fois)...");
+        
+        const token = await requestNotificationPermission(user.uid);
+        
+        if (token) {
+          console.log('✅ [useNotifications] FCM initialisé avec succès');
+          toast({
+            title: "✅ Notifications activées",
+            description: "Vous recevrez les notifications même quand l'app est fermée",
+            duration: 4000,
+          });
         } else {
-          console.log('❌ Permission des notifications refusée');
+          console.log('⏭️ [useNotifications] Permission refusée ou non disponible');
         }
-      } catch (error) {
-        console.error('❌ Erreur initialisation notifications:', error);
+      } else {
+        // Permission refusée
+        console.log('⚠️ [useNotifications] Permission refusée précédemment');
       }
     };
-
-    initNotifications();
-  }, [user, isInitialized]);
-
-  return {
-    messaging,
-    permissionGranted,
-    isInitialized,
-  };
+    
+    initFCM();
+    
+    // 2️⃣ Configurer les listeners une seule fois
+    if (!listenerConfigured.current) {
+      listenerConfigured.current = true;
+      console.log("👂 [useNotifications] Configuration des listeners...");
+      
+      listenToForegroundMessages((payload) => {
+        console.log("📬 [useNotifications] Message reçu:", payload.notification?.title);
+        
+        // Afficher la notification dans l'app
+        toast({
+          title: payload.notification?.title || "Notification",
+          description: payload.notification?.body || "",
+          duration: 5000,
+        });
+      });
+    }
+    
+    // Cleanup au démontage du composant
+    return () => {
+      console.log("🧹 [useNotifications] Cleanup");
+      initialized.current = false;
+    };
+  }, [user]);
 };

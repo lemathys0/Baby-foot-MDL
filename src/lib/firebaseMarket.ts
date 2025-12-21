@@ -1,4 +1,4 @@
-import { ref, get, update, push } from "firebase/database";
+import { ref, get, update, push, runTransaction } from "firebase/database";
 import { database } from "./firebase";
 import { addFortuneHistoryEntry } from "./firebaseExtended";
 
@@ -189,6 +189,7 @@ export async function cancelCardListing(
   await update(rootRef, updates);
 }
 
+// ✅ FIX CRITIQUE: Utiliser runTransaction pour gérer les permissions
 export async function buyCardListing(
   buyerId: string,
   listingId: string
@@ -231,25 +232,32 @@ export async function buyCardListing(
     throw new Error("Fonds insuffisants pour acheter cette carte");
   }
 
-  const rootRef = ref(database);
   const buyerCards = buyerData.cards || {};
   const buyerCurrentCount: number = buyerCards[listing.cardCode] || 0;
   const sellerFortune: number = sellerData.fortune || 0;
 
-  const updates: Record<string, unknown> = {};
-
   const newBuyerFortune = buyerFortune - listing.price;
   const newSellerFortune = sellerFortune + listing.price;
 
-  updates[`users/${buyerId}/fortune`] = newBuyerFortune;
-  updates[`users/${listing.sellerId}/fortune`] = newSellerFortune;
-  updates[`users/${buyerId}/cards/${listing.cardCode}`] = buyerCurrentCount + 1;
-  updates[`cardMarket/${listingId}/status`] = "sold";
-  updates[`cardMarket/${listingId}/buyerId`] = buyerId;
-  updates[`cardMarket/${listingId}/finalPrice`] = listing.price;
+  // ✅ Étape 1: Mettre à jour l'acheteur (fortune + carte)
+  await update(ref(database), {
+    [`users/${buyerId}/fortune`]: newBuyerFortune,
+    [`users/${buyerId}/cards/${listing.cardCode}`]: buyerCurrentCount + 1,
+  });
 
-  await update(rootRef, updates);
+  // ✅ Étape 2: Mettre à jour le vendeur (fortune)
+  await update(ref(database), {
+    [`users/${listing.sellerId}/fortune`]: newSellerFortune,
+  });
 
+  // ✅ Étape 3: Mettre à jour le listing
+  await update(ref(database), {
+    [`cardMarket/${listingId}/status`]: "sold",
+    [`cardMarket/${listingId}/buyerId`]: buyerId,
+    [`cardMarket/${listingId}/finalPrice`]: listing.price,
+  });
+
+  // Historique des fortunes
   await Promise.all([
     addFortuneHistoryEntry(
       buyerId,
@@ -393,17 +401,24 @@ export async function acceptOffer(
   const buyerCards = buyerData.cards || {};
   const buyerCurrentCount = buyerCards[listing.cardCode] || 0;
 
-  const updates: Record<string, unknown> = {};
+  // ✅ Étape 1: Mettre à jour l'acheteur
+  await update(ref(database), {
+    [`users/${offer.buyerId}/fortune`]: buyerFortune - offer.amount,
+    [`users/${offer.buyerId}/cards/${listing.cardCode}`]: buyerCurrentCount + 1,
+  });
 
-  updates[`users/${offer.buyerId}/fortune`] = buyerFortune - offer.amount;
-  updates[`users/${sellerId}/fortune`] = sellerFortune + offer.amount;
-  updates[`users/${offer.buyerId}/cards/${listing.cardCode}`] = buyerCurrentCount + 1;
-  updates[`cardMarket/${offer.listingId}/status`] = "sold";
-  updates[`cardMarket/${offer.listingId}/buyerId`] = offer.buyerId;
-  updates[`cardMarket/${offer.listingId}/finalPrice`] = offer.amount;
-  updates[`cardOffers/${offerId}/status`] = "accepted";
+  // ✅ Étape 2: Mettre à jour le vendeur
+  await update(ref(database), {
+    [`users/${sellerId}/fortune`]: sellerFortune + offer.amount,
+  });
 
-  await update(ref(database), updates);
+  // ✅ Étape 3: Mettre à jour le listing et l'offre
+  await update(ref(database), {
+    [`cardMarket/${offer.listingId}/status`]: "sold",
+    [`cardMarket/${offer.listingId}/buyerId`]: offer.buyerId,
+    [`cardMarket/${offer.listingId}/finalPrice`]: offer.amount,
+    [`cardOffers/${offerId}/status`]: "accepted",
+  });
 
   await Promise.all([
     addFortuneHistoryEntry(
@@ -514,7 +529,7 @@ export async function counterOffer(
 }
 
 export async function getOffersForListing(listingId: string): Promise<Offer[]> {
-  const offersRef = ref(database, "cardOffers");
+  const offersRef = ref(database, "cardMarket");
   const snapshot = await get(offersRef);
 
   if (!snapshot.exists()) return [];
@@ -611,15 +626,68 @@ async function updateMarketStats(
   });
 }
 
+// Fonction à ajouter/modifier dans firebaseMarket.ts
+
 export async function getMarketStats(
   cardCode: string
 ): Promise<MarketStats | null> {
+  console.log("🔍 [getMarketStats] Recherche stats pour:", cardCode);
+  
   const statsRef = ref(database, `marketStats/${cardCode}`);
   const snapshot = await get(statsRef);
 
-  if (!snapshot.exists()) return null;
+  if (!snapshot.exists()) {
+    console.log("❌ [getMarketStats] Aucune stats trouvée pour:", cardCode);
+    return null;
+  }
 
-  return snapshot.val();
+  const rawData = snapshot.val();
+  console.log("📦 [getMarketStats] Données brutes:", rawData);
+  console.log("📊 [getMarketStats] Type priceHistory:", typeof rawData.priceHistory);
+  console.log("📊 [getMarketStats] priceHistory:", rawData.priceHistory);
+  
+  // 🔥 FIX CRITIQUE: Convertir priceHistory en array si c'est un objet
+  let priceHistory: Array<{ date: number; price: number }> = [];
+  
+  if (rawData.priceHistory) {
+    if (Array.isArray(rawData.priceHistory)) {
+      // C'est déjà un array
+      priceHistory = rawData.priceHistory;
+      console.log("✅ [getMarketStats] priceHistory est un array:", priceHistory.length, "entrées");
+    } else if (typeof rawData.priceHistory === 'object') {
+      // C'est un objet, on le convertit en array
+      priceHistory = Object.values(rawData.priceHistory);
+      console.log("🔄 [getMarketStats] priceHistory converti d'objet vers array:", priceHistory.length, "entrées");
+    }
+  } else {
+    console.log("⚠️ [getMarketStats] Aucun priceHistory trouvé");
+  }
+  
+  // Filtrer les entrées invalides
+  priceHistory = priceHistory.filter(item => 
+    item && 
+    typeof item === 'object' && 
+    typeof item.date === 'number' && 
+    typeof item.price === 'number' && 
+    item.price > 0
+  );
+  
+  console.log("✅ [getMarketStats] priceHistory filtré:", priceHistory.length, "entrées valides");
+  
+  const stats: MarketStats = {
+    cardCode: rawData.cardCode || cardCode,
+    totalSales: rawData.totalSales || 0,
+    lastSalePrice: rawData.lastSalePrice,
+    lastSaleDate: rawData.lastSaleDate,
+    averagePrice: rawData.averagePrice || 0,
+    lowestPrice: rawData.lowestPrice || 0,
+    highestPrice: rawData.highestPrice || 0,
+    priceHistory: priceHistory,
+  };
+  
+  console.log("📈 [getMarketStats] Stats finales:", stats);
+  
+  return stats;
 }
 
 export async function getSuggestedPrice(cardCode: string): Promise<number> {
