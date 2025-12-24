@@ -33,14 +33,14 @@ export const ProfileHeader = ({
   const RoleIcon = config.icon;
 
   // Récupérer l'emoji de l'avatar équipé
-  const avatarItem = equippedAvatar ? SHOP_ITEMS.find(item => item.id === equippedAvatar) : null;
+  const avatarItem = equippedAvatar ? (SHOP_ITEMS.find(item => item && item.id === equippedAvatar) || null) : null;
   const avatarEmoji = avatarItem?.icon || "😊";
 
   // Récupérer la bannière équipée
-  const bannerItem = equippedBanner ? SHOP_ITEMS.find(item => item.id === equippedBanner) : null;
+  const bannerItem = equippedBanner ? (SHOP_ITEMS.find(item => item && item.id === equippedBanner) || null) : null;
 
   // Récupérer le titre équipé
-  const titleItem = equippedTitle ? SHOP_ITEMS.find(item => item.id === equippedTitle) : null;
+  const titleItem = equippedTitle ? (SHOP_ITEMS.find(item => item && item.id === equippedTitle) || null) : null;
 
   const eloRank = getEloRank(eloRating);
 

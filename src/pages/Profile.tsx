@@ -361,9 +361,9 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
         <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
           <div className="flex items-center gap-3">
             {equippedTheme?.preview ? (
-              <div 
+              <div
                 className="w-8 h-8 rounded-lg border-2 border-white/20"
-                style={{ backgroundColor: equippedTheme.preview }}
+                style={{ backgroundColor: equippedTheme?.preview || "#1e293b" }}
               />
             ) : (
               <div className="text-3xl">🎨</div>
@@ -386,7 +386,7 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
               {equippedBanner?.preview ? (
                 <div
                   className="w-24 h-12 rounded-lg border-2 border-white/20 relative overflow-hidden"
-                  style={{ background: (equippedBanner as any).preview }}
+                  style={{ background: (equippedBanner as any)?.preview || "linear-gradient(135deg, #1e293b 0%, #334155 100%)" }}
                 >
                   <div className="absolute inset-0 flex items-center justify-center">
                     <span className="text-2xl">{equippedBanner?.icon || "🎪"}</span>
