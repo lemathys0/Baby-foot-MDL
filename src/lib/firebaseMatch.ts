@@ -1282,13 +1282,17 @@ export async function getAvailablePlayers(useCache = true): Promise<Array<{
     }
     
     const users = snapshot.val();
-    const result = Object.entries(users).map(([id, data]: [string, any]) => ({
-      id,
-      username: data.username || "Unknown",
-      elo1v1: data.elo1v1 || 1000,
-      elo2v2: data.elo2v2 || 1000,
-      eloGlobal: data.eloGlobal || 1000,
-    }));
+    const result = Object.entries(users).map(([id, data]: [string, any]) => {
+      // Déoptimiser les données utilisateur
+      const deoptimizedData = deoptimizeUserData(data);
+      return {
+        id,
+        username: deoptimizedData.username || "Unknown",
+        elo1v1: deoptimizedData.elo1v1 || 1000,
+        elo2v2: deoptimizedData.elo2v2 || 1000,
+        eloGlobal: deoptimizedData.eloGlobal || 1000,
+      };
+    });
     
     // ✅ Mettre en cache
     playerCache.set(cacheKey, { data: result, timestamp: Date.now() });
@@ -1331,7 +1335,8 @@ export async function getPlayersByIds(playerIds: string[]): Promise<Record<strin
         const userRef = ref(database, `users/${id}`);
         const snapshot = await get(userRef);
         if (snapshot.exists()) {
-          const userData = snapshot.val();
+          const rawUserData = snapshot.val();
+          const userData = deoptimizeUserData(rawUserData);
           players[id] = {
             id,
             username: userData.username || "Unknown",

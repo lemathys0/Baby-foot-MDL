@@ -13,6 +13,7 @@ import { getUserBadges, type Badge as BadgeType } from "@/lib/firebaseExtended";
 import { getCardStats } from "@/lib/firebaseCards";
 import { toast } from "@/hooks/use-toast";
 import { logger } from '@/utils/logger';
+import { deoptimizeUserData } from "@/lib/dbOptimization";
 
 interface FriendProfileDialogProps {
   friendId: string;
@@ -83,7 +84,8 @@ export function FriendProfileDialog({
       const userSnapshot = await get(userRef);
 
       if (userSnapshot.exists()) {
-        const userData = userSnapshot.val();
+        const rawUserData = userSnapshot.val();
+        const userData = deoptimizeUserData(rawUserData);
         setProfile({
           username: userData.username || friendUsername,
           role: userData.role || "player",
