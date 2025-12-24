@@ -51,11 +51,11 @@ export const ProfileHeader = ({
         <div className="absolute inset-0">
           <div
             className="w-full h-full"
-            style={{ background: (bannerItem as any).preview || "linear-gradient(135deg, #1e293b 0%, #334155 100%)" }}
+            style={{ background: (bannerItem as any)?.preview || "linear-gradient(135deg, #1e293b 0%, #334155 100%)" }}
           />
           <div className="absolute inset-0 bg-black/40" />
           <div className="absolute inset-0 flex items-center justify-center text-9xl opacity-20">
-            {bannerItem.icon}
+            {bannerItem?.icon || "🎪"}
           </div>
         </div>
       )}
@@ -82,9 +82,9 @@ export const ProfileHeader = ({
               </div>
               {titleItem && (
                 <div className="inline-flex items-center gap-2 mt-1 px-3 py-1 rounded-full bg-gradient-to-r from-sky-500/30 via-cyan-500/30 to-indigo-500/30 border border-cyan-400/60 shadow-md backdrop-blur">
-                  <span className="text-lg drop-shadow">{titleItem.icon}</span>
+                  <span className="text-lg drop-shadow">{titleItem?.icon || "👑"}</span>
                   <span className="text-[11px] font-semibold tracking-wide uppercase text-cyan-100 drop-shadow-sm">
-                    {(titleItem as any).preview || titleItem.name}
+                    {(titleItem as any)?.preview || titleItem?.name || "Titre"}
                   </span>
                 </div>
               )}
