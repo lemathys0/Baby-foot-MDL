@@ -32,17 +32,23 @@ export const ProfileHeader = ({
   const config = roleConfig[role];
   const RoleIcon = config.icon;
 
-  // Récupérer l'emoji de l'avatar équipé
-  const avatarItem = equippedAvatar ? (SHOP_ITEMS.find(item => item && item.id === equippedAvatar) || null) : null;
+  // Récupérer l'emoji de l'avatar équipé - with defensive checks
+  const avatarItem = (equippedAvatar && equippedAvatar !== "")
+    ? (SHOP_ITEMS?.find(item => item && item.id === equippedAvatar) || null)
+    : null;
   const avatarEmoji = avatarItem?.icon || "😊";
 
-  // Récupérer la bannière équipée
-  const bannerItem = equippedBanner ? (SHOP_ITEMS.find(item => item && item.id === equippedBanner) || null) : null;
+  // Récupérer la bannière équipée - with defensive checks
+  const bannerItem = (equippedBanner && equippedBanner !== "")
+    ? (SHOP_ITEMS?.find(item => item && item.id === equippedBanner) || null)
+    : null;
 
-  // Récupérer le titre équipé
-  const titleItem = equippedTitle ? (SHOP_ITEMS.find(item => item && item.id === equippedTitle) || null) : null;
+  // Récupérer le titre équipé - with defensive checks
+  const titleItem = (equippedTitle && equippedTitle !== "")
+    ? (SHOP_ITEMS?.find(item => item && item.id === equippedTitle) || null)
+    : null;
 
-  const eloRank = getEloRank(eloRating);
+  const eloRank = getEloRank(eloRating) || { icon: "🥉", name: "Bronze", color: "#CD7F32" };
 
   return (
     <Card className="relative overflow-hidden">
@@ -103,9 +109,9 @@ export const ProfileHeader = ({
                   Rang:{" "}
                   <span
                     className="font-bold"
-                    style={{ color: eloRank.color }}
+                    style={{ color: eloRank?.color || "#CD7F32" }}
                   >
-                    {eloRank.icon} {eloRank.name}
+                    {eloRank?.icon || "🥉"} {eloRank?.name || "Bronze"}
                   </span>
                 </span>
               </div>
