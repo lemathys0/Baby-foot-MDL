@@ -31,6 +31,8 @@ import Chat from "./pages/Chat";
 import MyOffers from "./pages/MyOffers";
 import CardStatistics from "./pages/CardStatistics";
 import Quests from "./pages/Quests";
+import Challenges from "./pages/Challenges";
+import Rivalries from "./pages/Rivalries";
 
 const queryClient = new QueryClient();
 
@@ -66,6 +68,8 @@ const AppContent = () => {
           <Route path="/tournament" element={<ProtectedRoute><PageTransition><Tournament /></PageTransition></ProtectedRoute>} />
           <Route path="/chat" element={<ProtectedRoute><PageTransition><Chat /></PageTransition></ProtectedRoute>} />
           <Route path="/quests" element={<ProtectedRoute><PageTransition><Quests /></PageTransition></ProtectedRoute>} />
+          <Route path="/challenges" element={<ProtectedRoute><PageTransition><Challenges /></PageTransition></ProtectedRoute>} />
+          <Route path="/rivalries" element={<ProtectedRoute><PageTransition><Rivalries /></PageTransition></ProtectedRoute>} />
 
           {/* 404 */}
           <Route path="*" element={<PageTransition><NotFound /></PageTransition>} />

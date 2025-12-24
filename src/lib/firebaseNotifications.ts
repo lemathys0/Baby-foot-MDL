@@ -10,11 +10,11 @@ import { logger } from "@/utils/logger";
 export interface Notification {
   id: string;
   userId: string;
-  type: 
-    | "offer_received" 
-    | "offer_accepted" 
-    | "offer_rejected" 
-    | "offer_countered" 
+  type:
+    | "offer_received"
+    | "offer_accepted"
+    | "offer_rejected"
+    | "offer_countered"
     | "listing_sold"
     | "new_message"
     | "friend_request"
@@ -23,28 +23,44 @@ export interface Notification {
     | "bet_won"
     | "bet_lost"
     | "fortune_received"
-    | "admin_announcement";
+    | "admin_announcement"
+    | "challenge_received"
+    | "challenge_accepted"
+    | "challenge_declined"
+    | "challenge_won"
+    | "challenge_lost"
+    | "rivalry_milestone"
+    | "quest_completed"
+    | "achievement_unlocked";
   title: string;
   message: string;
   relatedId?: string;
   read: boolean;
   createdAt: number;
+  imageUrl?: string; // Pour les notifications enrichies avec image
+  actionUrl?: string; // Pour rediriger vers une page spécifique
+  priority?: "low" | "normal" | "high"; // Priorité de la notification
 }
 
 /**
- * ✅ Fonction générique pour créer une notification
+ * ✅ Fonction générique pour créer une notification enrichie
  */
 async function createNotification(
   userId: string,
   type: Notification["type"],
   title: string,
   message: string,
-  relatedId?: string
+  relatedId?: string,
+  options?: {
+    imageUrl?: string;
+    actionUrl?: string;
+    priority?: "low" | "normal" | "high";
+  }
 ): Promise<void> {
   try {
     const notificationRef = ref(database, `notifications/${userId}`);
     const newNotificationRef = push(notificationRef);
-    
+
     await update(newNotificationRef, {
       type,
       title,
@@ -52,6 +68,9 @@ async function createNotification(
       relatedId: relatedId || "",
       read: false,
       createdAt: Date.now(),
+      imageUrl: options?.imageUrl || "",
+      actionUrl: options?.actionUrl || "",
+      priority: options?.priority || "normal",
     });
 
     logger.log(`✅ Notification envoyée à ${userId}: ${title}`);
@@ -60,6 +79,8 @@ async function createNotification(
     throw error;
   }
 }
+
+export default createNotification;
 
 // ========================================
 // 🛒 NOTIFICATIONS MARCHÉ DE CARTES
@@ -302,4 +323,167 @@ export async function notifyAllUsers(
     logger.error("❌ Erreur notification globale:", error);
     throw error;
   }
+}
+
+// ========================================
+// 🥊 NOTIFICATIONS DÉFIS
+// ========================================
+
+export async function notifyChallengeReceived(
+  challengedId: string,
+  challengerUsername: string,
+  type: "1v1" | "2v2",
+  stake?: number,
+  challengeId?: string
+): Promise<void> {
+  await createNotification(
+    challengedId,
+    "challenge_received",
+    "Nouveau défi!",
+    `${challengerUsername} vous défie en ${type}${stake ? ` pour ${stake}€` : ""}`,
+    challengeId,
+    {
+      priority: stake && stake > 100 ? "high" : "normal",
+      actionUrl: "/challenges",
+    }
+  );
+}
+
+export async function notifyChallengeAccepted(
+  challengerId: string,
+  challengedUsername: string,
+  challengeId?: string
+): Promise<void> {
+  await createNotification(
+    challengerId,
+    "challenge_accepted",
+    "Défi accepté! 🎮",
+    `${challengedUsername} a accepté votre défi!`,
+    challengeId,
+    {
+      priority: "high",
+      actionUrl: "/challenges",
+    }
+  );
+}
+
+export async function notifyChallengeDeclined(
+  challengerId: string,
+  challengedUsername: string,
+  challengeId?: string
+): Promise<void> {
+  await createNotification(
+    challengerId,
+    "challenge_declined",
+    "Défi refusé",
+    `${challengedUsername} a refusé votre défi`,
+    challengeId,
+    {
+      actionUrl: "/challenges",
+    }
+  );
+}
+
+export async function notifyChallengeWon(
+  winnerId: string,
+  opponentUsername: string,
+  stake?: number,
+  challengeId?: string
+): Promise<void> {
+  await createNotification(
+    winnerId,
+    "challenge_won",
+    "Défi gagné! 🏆",
+    `Vous avez gagné le défi contre ${opponentUsername}${stake ? ` et remporté ${stake}€` : ""}!`,
+    challengeId,
+    {
+      priority: "high",
+      actionUrl: "/challenges",
+    }
+  );
+}
+
+export async function notifyChallengeLost(
+  loserId: string,
+  opponentUsername: string,
+  stake?: number,
+  challengeId?: string
+): Promise<void> {
+  await createNotification(
+    loserId,
+    "challenge_lost",
+    "Défi perdu",
+    `Vous avez perdu le défi contre ${opponentUsername}${stake ? ` (-${stake}€)` : ""}`,
+    challengeId,
+    {
+      actionUrl: "/challenges",
+    }
+  );
+}
+
+// ========================================
+// 🔥 NOTIFICATIONS RIVALITÉS
+// ========================================
+
+export async function notifyRivalryMilestone(
+  userId: string,
+  rivalUsername: string,
+  milestone: string,
+  totalMatches: number
+): Promise<void> {
+  await createNotification(
+    userId,
+    "rivalry_milestone",
+    "Nouvelle étape de rivalité! 🔥",
+    `Votre rivalité avec ${rivalUsername} atteint ${milestone} (${totalMatches} matchs)`,
+    undefined,
+    {
+      priority: "normal",
+      actionUrl: "/rivalries",
+    }
+  );
+}
+
+// ========================================
+// 🎯 NOTIFICATIONS QUÊTES
+// ========================================
+
+export async function notifyQuestCompleted(
+  userId: string,
+  questTitle: string,
+  reward: number
+): Promise<void> {
+  await createNotification(
+    userId,
+    "quest_completed",
+    "Quête terminée! ✨",
+    `${questTitle} - Récompense: ${reward}€`,
+    undefined,
+    {
+      priority: "normal",
+      actionUrl: "/quests",
+    }
+  );
+}
+
+// ========================================
+// 🏅 NOTIFICATIONS SUCCÈS
+// ========================================
+
+export async function notifyAchievementUnlocked(
+  userId: string,
+  achievementTitle: string,
+  achievementDescription: string
+): Promise<void> {
+  await createNotification(
+    userId,
+    "achievement_unlocked",
+    "Succès débloqué! 🏅",
+    `${achievementTitle}: ${achievementDescription}`,
+    undefined,
+    {
+      priority: "high",
+      actionUrl: "/profile",
+    }
+  );
 }

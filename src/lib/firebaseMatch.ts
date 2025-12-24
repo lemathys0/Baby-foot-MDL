@@ -1085,6 +1085,48 @@ export async function recordMatch(
       })
     );
 
+    // 🔥 Mettre à jour les rivalités pour les matchs 1v1
+    if (matchType === '1v1') {
+      try {
+        const { updateRivalry, notifyRivalryMilestone } = await import('./rivalrySystem');
+        await updateRivalry(
+          team1PlayerIds[0],
+          team2PlayerIds[0],
+          users[team1PlayerIds[0]].username,
+          users[team2PlayerIds[0]].username,
+          team1Won
+        );
+
+        // Vérifier les milestones de rivalité
+        const { getRivalryBetween } = await import('./rivalrySystem');
+        const rivalry = await getRivalryBetween(team1PlayerIds[0], team2PlayerIds[0]);
+
+        if (rivalry) {
+          // Notifier pour les milestones (10, 20, 50 matchs)
+          if ([10, 20, 50].includes(rivalry.totalMatches)) {
+            const milestone = rivalry.intensity === 'legendary' ? 'LÉGENDAIRE' :
+                            rivalry.intensity === 'heated' ? 'INTENSE' : 'CASUAL';
+
+            await notifyRivalryMilestone(
+              team1PlayerIds[0],
+              users[team2PlayerIds[0]].username,
+              milestone,
+              rivalry.totalMatches
+            );
+
+            await notifyRivalryMilestone(
+              team2PlayerIds[0],
+              users[team1PlayerIds[0]].username,
+              milestone,
+              rivalry.totalMatches
+            );
+          }
+        }
+      } catch (error) {
+        logger.error("Erreur mise à jour rivalité:", error);
+      }
+    }
+
     return { eloUpdates };
   } catch (error) {
     logger.error("Erreur lors de l'enregistrement du match:", error);

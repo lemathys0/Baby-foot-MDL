@@ -311,6 +311,22 @@
         }
       }
     },
+
+    "challenges": {
+      ".read": "auth != null",
+      "$challengeId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (!data.exists() || data.child('challengerId').val() == auth.uid || data.child('challengedId').val() == auth.uid)"
+      }
+    },
+
+    "rivalries": {
+      ".read": "auth != null",
+      "$rivalryId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
     
     "chats": {
       ".read": "auth != null",
