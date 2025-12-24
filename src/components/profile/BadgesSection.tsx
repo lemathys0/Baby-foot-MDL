@@ -105,7 +105,7 @@ export function BadgesSection({ userId }: BadgesSectionProps) {
           const achievement = ACHIEVEMENT_DEFINITIONS.find(a => a.id === badge.id);
           toast({
             title: "🎉 Nouveau badge débloqué !",
-            description: `${badge.icon} ${badge.name} - +${achievement?.reward || 0}€`,
+            description: `${badge?.icon || "🏆"} ${badge?.name || "Badge"} - +${achievement?.reward || 0}€`,
           });
         });
       } else {
