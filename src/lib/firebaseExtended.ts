@@ -1767,7 +1767,7 @@ export const SHOP_ITEMS: ShopItem[] = [
   ...EFFECTS,
   ...LOOTBOXES,
   ...TITLES,
-];
+].filter(item => item != null && typeof item === 'object' && item.id && item.icon);
 
 // ✅ FIX: Correction de buyShopItem
 export async function buyShopItem(
