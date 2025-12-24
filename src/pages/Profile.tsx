@@ -383,20 +383,20 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
         {equippedBanner && (
           <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
             <div className="flex items-center gap-3">
-              {equippedBanner.preview ? (
+              {equippedBanner?.preview ? (
                 <div
                   className="w-24 h-12 rounded-lg border-2 border-white/20 relative overflow-hidden"
                   style={{ background: (equippedBanner as any).preview }}
                 >
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl">{equippedBanner.icon || "🎪"}</span>
+                    <span className="text-2xl">{equippedBanner?.icon || "🎪"}</span>
                   </div>
                 </div>
               ) : (
-                <div className="text-3xl">{equippedBanner.icon || "🎪"}</div>
+                <div className="text-3xl">{equippedBanner?.icon || "🎪"}</div>
               )}
               <div>
-                <p className="text-sm font-medium">{equippedBanner.name}</p>
+                <p className="text-sm font-medium">{equippedBanner?.name || "Bannière"}</p>
                 <p className="text-xs text-muted-foreground">Bannière</p>
               </div>
             </div>
@@ -410,9 +410,9 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
           <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
             <div className="flex items-center gap-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-sky-500/30 via-cyan-500/30 to-indigo-500/30 border border-cyan-400/60">
-                <span className="text-xl">{equippedTitle.icon || "👑"}</span>
+                <span className="text-xl">{equippedTitle?.icon || "👑"}</span>
                 <span className="text-[11px] font-semibold tracking-wide uppercase text-cyan-100">
-                  {(equippedTitle as any).preview || equippedTitle.name}
+                  {(equippedTitle as any)?.preview || equippedTitle?.name || "Titre"}
                 </span>
               </div>
               <div>
@@ -428,9 +428,9 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
         {equippedEffect && (
           <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
             <div className="flex items-center gap-3">
-              <div className="text-3xl">{equippedEffect.icon || "✨"}</div>
+              <div className="text-3xl">{equippedEffect?.icon || "✨"}</div>
               <div>
-                <p className="text-sm font-medium">{equippedEffect.name}</p>
+                <p className="text-sm font-medium">{equippedEffect?.name || "Effet"}</p>
                 <p className="text-xs text-muted-foreground">Effet</p>
               </div>
             </div>
