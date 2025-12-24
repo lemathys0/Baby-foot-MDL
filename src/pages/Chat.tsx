@@ -28,6 +28,7 @@ import {
   type ChatMessage,
 } from "@/lib/firebaseChat";
 import { Loader2 } from "lucide-react";
+import { logger } from '@/utils/logger';
 
 const ChatComponent = () => {
   const { user, userProfile } = useAuth();
@@ -94,7 +95,7 @@ const ChatComponent = () => {
         setSelectedChat(userChats[0]);
       }
     } catch (error) {
-      console.error("Erreur chargement chats:", error);
+      logger.error("Erreur chargement chats:", error);
     } finally {
       setIsLoading(false);
     }
@@ -106,7 +107,7 @@ const ChatComponent = () => {
       const chatMessages = await getChatMessages(selectedChat.id);
       setMessages(chatMessages);
     } catch (error) {
-      console.error("Erreur chargement messages:", error);
+      logger.error("Erreur chargement messages:", error);
     }
   };
 
@@ -140,7 +141,7 @@ const ChatComponent = () => {
             messageText.substring(0, 50) + (messageText.length > 50 ? "..." : ""),
             selectedChat.id
           ).catch(error => {
-            console.error(`❌ Erreur notification pour ${memberId}:`, error);
+            logger.error(`❌ Erreur notification pour ${memberId}:`, error);
           })
         );
       
@@ -150,9 +151,9 @@ const ChatComponent = () => {
       // 3. Réinitialiser le champ de texte
       setMessageText("");
       
-      console.log(`✅ Message envoyé avec ${notificationPromises.length} notification(s)`);
+      logger.log(`✅ Message envoyé avec ${notificationPromises.length} notification(s)`);
     } catch (error: any) {
-      console.error("❌ Erreur envoi message:", error);
+      logger.error("❌ Erreur envoi message:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible d'envoyer le message",
@@ -173,7 +174,7 @@ const ChatComponent = () => {
       const results = await searchUsers(query, user.uid);
       setSearchResults(results);
     } catch (error) {
-      console.error("Erreur recherche:", error);
+      logger.error("Erreur recherche:", error);
     }
   };
 

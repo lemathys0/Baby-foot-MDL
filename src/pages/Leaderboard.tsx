@@ -10,6 +10,8 @@ import { getEloRank } from "@/lib/firebaseMatch";
 import { ref, onValue, get } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { LeaderboardSkeleton } from "@/components/SkeletonLoader";
+import { logger } from '@/utils/logger';
+import { deoptimizeUserData } from "@/lib/dbOptimization";
 
 interface PlayerStats {
   id: string;
@@ -24,6 +26,115 @@ interface PlayerStats {
   winsMixed: number;
   lossesMixed: number;
 }
+
+// Helper functions moved outside component
+const getRankColor = (rank: number) => {
+  if (rank === 1) return "text-rarity-gold";
+  if (rank === 2) return "text-rarity-silver";
+  if (rank === 3) return "text-rarity-bronze";
+  return "text-muted-foreground";
+};
+
+const getRankIcon = (rank: number) => {
+  if (rank === 1) return "👑";
+  if (rank === 2) return "🥈";
+  if (rank === 3) return "🥉";
+  return rank;
+};
+
+const getWinRateForMode = (player: PlayerStats, mode: "1v1" | "2v2" | "mixed") => {
+  const wins = mode === "1v1" ? player.wins1v1 : mode === "2v2" ? player.wins2v2 : player.winsMixed;
+  const losses = mode === "1v1" ? player.losses1v1 : mode === "2v2" ? player.losses2v2 : player.lossesMixed;
+  const total = wins + losses;
+  return total === 0 ? 0 : Math.round((wins / total) * 100);
+};
+
+const getRankBadgeComponent = (elo: number) => {
+  const rank = getEloRank(elo);
+  return (
+    <Badge
+      style={{
+        backgroundColor: `${rank.color}20`,
+        borderColor: rank.color,
+        color: rank.color
+      }}
+      className="border"
+    >
+      <span className="mr-1">{rank.icon}</span>
+      {rank.name}
+    </Badge>
+  );
+};
+
+// ✅ OPTIMISATION: Memoized LeaderboardItem component moved outside to avoid closure issues
+const LeaderboardItem = React.memo(({
+  player,
+  rank,
+  index,
+  selectedMode
+}: {
+  player: PlayerStats;
+  rank: number;
+  index: number;
+  selectedMode: "global" | "1v1" | "2v2";
+}) => {
+  const currentElo = selectedMode === "1v1" ? player.elo1v1 : selectedMode === "2v2" ? player.elo2v2 : player.eloGlobal;
+  const modeKey = selectedMode === "1v1" ? "1v1" : selectedMode === "2v2" ? "2v2" : "mixed";
+  const winRate = getWinRateForMode(player, modeKey);
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ delay: 0.1 + index * 0.05 }}
+      className={`rounded-lg border p-4 ${
+        rank <= 3
+          ? "border-primary/40 bg-gradient-to-r from-primary/10 to-transparent"
+          : "border-border bg-surface-alt"
+      }`}
+    >
+      <div className="flex items-center gap-4">
+        {/* Rank */}
+        <div className={`flex h-12 w-12 items-center justify-center rounded-lg bg-surface font-bold ${getRankColor(rank)}`}>
+          {getRankIcon(rank)}
+        </div>
+
+        {/* Player Info */}
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-1">
+            <p className="font-semibold text-foreground">{player.username}</p>
+            {getRankBadgeComponent(currentElo)}
+          </div>
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            <span>WR: {winRate}%</span>
+            <span>•</span>
+            <span>
+              {selectedMode === "1v1" && `${player.wins1v1}V - ${player.losses1v1}D`}
+              {selectedMode === "2v2" && `${player.wins2v2}V - ${player.losses2v2}D`}
+              {selectedMode === "global" && `${player.winsMixed}V - ${player.lossesMixed}D`}
+            </span>
+          </div>
+        </div>
+
+        {/* ELO */}
+        <div className="text-right">
+          <p className="text-2xl font-bold text-primary">{currentElo}</p>
+          <p className="text-xs text-muted-foreground">ELO</p>
+        </div>
+      </div>
+    </motion.div>
+  );
+}, (prevProps, nextProps) => {
+  // ✅ OPTIMISATION: Ne re-render que si les données importantes changent
+  return (
+    prevProps.player.id === nextProps.player.id &&
+    prevProps.player.elo1v1 === nextProps.player.elo1v1 &&
+    prevProps.player.elo2v2 === nextProps.player.elo2v2 &&
+    prevProps.player.eloGlobal === nextProps.player.eloGlobal &&
+    prevProps.rank === nextProps.rank &&
+    prevProps.selectedMode === nextProps.selectedMode
+  );
+});
 
 const Leaderboard = () => {
   const [players, setPlayers] = useState<PlayerStats[]>([]);
@@ -45,7 +156,8 @@ const Leaderboard = () => {
 
       const playersData: PlayerStats[] = [];
       snapshot.forEach((child) => {
-        const userData = child.val();
+        const rawUserData = child.val();
+        const userData = deoptimizeUserData(rawUserData);
         playersData.push({
           id: child.key!,
           username: userData.username || "Joueur",
@@ -65,7 +177,7 @@ const Leaderboard = () => {
       setPlayers(playersData);
       setIsLoading(false);
     }, (error) => {
-      console.error("Erreur chargement leaderboard:", error);
+      logger.error("Erreur chargement leaderboard:", error);
       setIsLoading(false);
     });
 
@@ -78,31 +190,6 @@ const Leaderboard = () => {
     const sortKey = selectedMode === "1v1" ? "elo1v1" : selectedMode === "2v2" ? "elo2v2" : "eloGlobal";
     return [...players].sort((a, b) => b[sortKey] - a[sortKey]);
   }, [players, selectedMode]);
-
-  // ✅ OPTIMISATION: Memoization du calcul du win rate
-  const getWinRate = useCallback((player: PlayerStats, mode: "1v1" | "2v2" | "mixed") => {
-    const wins = mode === "1v1" ? player.wins1v1 : mode === "2v2" ? player.wins2v2 : player.winsMixed;
-    const losses = mode === "1v1" ? player.losses1v1 : mode === "2v2" ? player.losses2v2 : player.lossesMixed;
-    const total = wins + losses;
-    return total === 0 ? 0 : Math.round((wins / total) * 100);
-  }, []);
-
-  const getRankBadge = (elo: number) => {
-    const rank = getEloRank(elo);
-    return (
-      <Badge 
-        style={{ 
-          backgroundColor: `${rank.color}20`,
-          borderColor: rank.color,
-          color: rank.color 
-        }}
-        className="border"
-      >
-        <span className="mr-1">{rank.icon}</span>
-        {rank.name}
-      </Badge>
-    );
-  };
 
   // ✅ OPTIMISATION: Memoization de la distribution des rangs
   const rankDistribution = useMemo(() => {
@@ -133,87 +220,6 @@ const Leaderboard = () => {
       percentage: Math.round((count / total) * 100),
     }));
   }, [players, selectedMode]);
-
-  // ✅ OPTIMISATION: Memoization du composant pour éviter les re-renders inutiles
-  const LeaderboardItem = React.memo(({ 
-    player, 
-    rank, 
-    index 
-  }: { 
-    player: PlayerStats; 
-    rank: number; 
-    index: number;
-  }) => {
-    const currentElo = selectedMode === "1v1" ? player.elo1v1 : selectedMode === "2v2" ? player.elo2v2 : player.eloGlobal;
-    const modeKey = selectedMode === "1v1" ? "1v1" : selectedMode === "2v2" ? "2v2" : "mixed";
-    const winRate = getWinRate(player, modeKey);
-    
-    const getRankColor = (rank: number) => {
-      if (rank === 1) return "text-rarity-gold";
-      if (rank === 2) return "text-rarity-silver";
-      if (rank === 3) return "text-rarity-bronze";
-      return "text-muted-foreground";
-    };
-
-    const getRankIcon = (rank: number) => {
-      if (rank === 1) return "👑";
-      if (rank === 2) return "🥈";
-      if (rank === 3) return "🥉";
-      return rank;
-    };
-
-    return (
-      <motion.div
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.1 + index * 0.05 }}
-        className={`rounded-lg border p-4 ${
-          rank <= 3 
-            ? "border-primary/40 bg-gradient-to-r from-primary/10 to-transparent" 
-            : "border-border bg-surface-alt"
-        }`}
-      >
-        <div className="flex items-center gap-4">
-          {/* Rank */}
-          <div className={`flex h-12 w-12 items-center justify-center rounded-lg bg-surface font-bold ${getRankColor(rank)}`}>
-            {getRankIcon(rank)}
-          </div>
-
-          {/* Player Info */}
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1">
-              <p className="font-semibold text-foreground">{player.username}</p>
-              {getRankBadge(currentElo)}
-            </div>
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <span>WR: {winRate}%</span>
-              <span>•</span>
-              <span>
-                {selectedMode === "1v1" && `${player.wins1v1}V - ${player.losses1v1}D`}
-                {selectedMode === "2v2" && `${player.wins2v2}V - ${player.losses2v2}D`}
-                {selectedMode === "global" && `${player.winsMixed}V - ${player.lossesMixed}D`}
-              </span>
-            </div>
-          </div>
-
-          {/* ELO */}
-          <div className="text-right">
-            <p className="text-2xl font-bold text-primary">{currentElo}</p>
-            <p className="text-xs text-muted-foreground">ELO</p>
-          </div>
-        </div>
-      </motion.div>
-    );
-  }, (prevProps, nextProps) => {
-    // ✅ OPTIMISATION: Ne re-render que si les données importantes changent
-    return (
-      prevProps.player.id === nextProps.player.id &&
-      prevProps.player.elo1v1 === nextProps.player.elo1v1 &&
-      prevProps.player.elo2v2 === nextProps.player.elo2v2 &&
-      prevProps.player.eloGlobal === nextProps.player.eloGlobal &&
-      prevProps.rank === nextProps.rank
-    );
-  });
 
   // ✅ OPTIMISATION: Memoization des top 3 joueurs
   const topPlayers = useMemo(() => sortedPlayers.slice(0, 3), [sortedPlayers]);
@@ -299,7 +305,7 @@ const Leaderboard = () => {
                 <span className="text-2xl">🥈</span>
               </div>
               <p className="text-sm font-medium text-foreground mb-1">{topPlayers[1].username}</p>
-              {getRankBadge(selectedMode === "1v1" ? topPlayers[1].elo1v1 : selectedMode === "2v2" ? topPlayers[1].elo2v2 : topPlayers[1].eloGlobal)}
+              {getRankBadgeComponent(selectedMode === "1v1" ? topPlayers[1].elo1v1 : selectedMode === "2v2" ? topPlayers[1].elo2v2 : topPlayers[1].eloGlobal)}
               <div className="mt-2 h-20 w-20 rounded-t-lg bg-gradient-to-b from-rarity-silver/40 to-rarity-silver/20 flex items-center justify-center">
                 <span className="text-2xl font-bold text-rarity-silver">
                   {selectedMode === "1v1" ? topPlayers[1].elo1v1 : selectedMode === "2v2" ? topPlayers[1].elo2v2 : topPlayers[1].eloGlobal}
@@ -322,7 +328,7 @@ const Leaderboard = () => {
                 <span className="text-3xl">🏆</span>
               </div>
               <p className="font-semibold text-foreground mb-1">{topPlayers[0].username}</p>
-              {getRankBadge(selectedMode === "1v1" ? topPlayers[0].elo1v1 : selectedMode === "2v2" ? topPlayers[0].elo2v2 : topPlayers[0].eloGlobal)}
+              {getRankBadgeComponent(selectedMode === "1v1" ? topPlayers[0].elo1v1 : selectedMode === "2v2" ? topPlayers[0].elo2v2 : topPlayers[0].eloGlobal)}
               <div className="mt-2 h-28 w-24 rounded-t-lg bg-gradient-to-b from-rarity-gold/40 to-rarity-gold/20 flex items-center justify-center">
                 <span className="text-3xl font-bold text-rarity-gold">
                   {selectedMode === "1v1" ? topPlayers[0].elo1v1 : selectedMode === "2v2" ? topPlayers[0].elo2v2 : topPlayers[0].eloGlobal}
@@ -338,7 +344,7 @@ const Leaderboard = () => {
                 <span className="text-xl">🥉</span>
               </div>
               <p className="text-sm font-medium text-foreground mb-1">{topPlayers[2].username}</p>
-              {getRankBadge(selectedMode === "1v1" ? topPlayers[2].elo1v1 : selectedMode === "2v2" ? topPlayers[2].elo2v2 : topPlayers[2].eloGlobal)}
+              {getRankBadgeComponent(selectedMode === "1v1" ? topPlayers[2].elo1v1 : selectedMode === "2v2" ? topPlayers[2].elo2v2 : topPlayers[2].eloGlobal)}
               <div className="mt-2 h-16 w-18 rounded-t-lg bg-gradient-to-b from-rarity-bronze/40 to-rarity-bronze/20 flex items-center justify-center px-6">
                 <span className="text-xl font-bold text-rarity-bronze">
                   {selectedMode === "1v1" ? topPlayers[2].elo1v1 : selectedMode === "2v2" ? topPlayers[2].elo2v2 : topPlayers[2].eloGlobal}
@@ -361,7 +367,7 @@ const Leaderboard = () => {
             <CardTitle className="text-lg">Distribution des Rangs</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               {[
                 { name: "Bronze", icon: "🥉", color: "#CD7F32" },
                 { name: "Argent", icon: "🥈", color: "#C0C0C0" },
@@ -404,6 +410,7 @@ const Leaderboard = () => {
                 player={player}
                 rank={globalRank}
                 index={index}
+                selectedMode={selectedMode}
               />
             );
           })

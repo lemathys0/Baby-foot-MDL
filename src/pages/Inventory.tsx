@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { ref, get } from "firebase/database";
+import { ref, get, onValue } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { SHOP_ITEMS, equipItem, openLootbox, type ShopItem, type LootboxReward, type ItemType } from "@/lib/firebaseExtended";
+import { logger } from '@/utils/logger';
 
 const rarityConfig = {
   common: {
@@ -73,38 +74,43 @@ const Inventory = () => {
 
   useEffect(() => {
     if (!user) return;
-    loadInventory();
+
+    setIsLoading(true);
+    const userRef = ref(database, `users/${user.uid}`);
+
+    // ✅ Listener temps réel pour synchronisation automatique de l'inventaire
+    const unsubscribe = onValue(userRef, (snapshot) => {
+      try {
+        if (snapshot.exists()) {
+          const data = snapshot.val();
+          setInventory(data.inventory || {});
+          setEquipped({
+            avatar: data.avatar || "",
+            theme: data.theme || "",
+            banner: data.banner || "",
+            title: data.title || "",
+            effect: data.effect || "",
+          });
+          logger.log("✅ [Inventory] Inventaire mis à jour en temps réel");
+        }
+      } catch (error) {
+        logger.error("Erreur chargement inventaire:", error);
+        toast({
+          title: "Erreur",
+          description: "Impossible de charger l'inventaire",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoading(false);
+      }
+    });
+
+    return () => unsubscribe();
   }, [user]);
 
   const loadInventory = async () => {
-    if (!user) return;
-    
-    setIsLoading(true);
-    try {
-      const userRef = ref(database, `users/${user.uid}`);
-      const snapshot = await get(userRef);
-      
-      if (snapshot.exists()) {
-        const data = snapshot.val();
-        setInventory(data.inventory || {});
-        setEquipped({
-          avatar: data.avatar || "",
-          theme: data.theme || "",
-          banner: data.banner || "",
-          title: data.title || "",
-          effect: data.effect || "",
-        });
-      }
-    } catch (error) {
-      console.error("Erreur chargement inventaire:", error);
-      toast({
-        title: "Erreur",
-        description: "Impossible de charger l'inventaire",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    // Cette fonction n'est plus nécessaire car l'inventaire est chargé en temps réel
+    // On la garde pour compatibilité mais elle ne sera plus appelée
   };
 
   const handleEquip = async (itemId: string, itemType: ItemType) => {
@@ -488,7 +494,7 @@ const Inventory = () => {
                     </p>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-3 gap-4 mb-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                       {lootboxResult.rewards.map((reward, index) => {
                         const item = SHOP_ITEMS.find(i => i.id === reward.itemId);
                         const rarity = rarityConfig[reward.rarity];

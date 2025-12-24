@@ -4,10 +4,37 @@ import { TrendingUp, TrendingDown, Calendar } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Area, AreaChart } from "recharts";
 import { getFortuneHistory, type FortuneHistory } from "@/lib/firebaseExtended";
+import { logger } from '@/utils/logger';
 
 interface FortuneHistoryCardProps {
   userId: string;
 }
+
+// ✅ Fonctions helper déplacées en haut
+const getTransactionIcon = (type: string) => {
+  switch (type) {
+    case "tournament_entry": return "🎫";
+    case "tournament_prize": return "🏆";
+    case "match_win": return "✅";
+    case "match_loss": return "❌";
+    case "bet_win": return "💰";
+    case "bet_loss": return "📉";
+    case "daily_bonus": return "🎁";
+    case "admin_adjustment": return "⚙️";
+    case "card_sale": return "💳";
+    case "card_purchase": return "🛒";
+    case "shop_purchase": return "🛍️";
+    default: return "💵";
+  }
+};
+
+const getTransactionColor = (amount: number, type: string) => {
+  if (type === "tournament_entry") return "text-orange-500";
+  if (type === "tournament_prize") return "text-green-500";
+  if (amount > 0) return "text-green-500";
+  if (amount < 0) return "text-red-500";
+  return "text-muted-foreground";
+};
 
 export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
   const [history, setHistory] = useState<FortuneHistory[]>([]);
@@ -24,19 +51,17 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
       const data = await getFortuneHistory(userId, period);
       setHistory(data);
     } catch (error) {
-      console.error("Erreur chargement historique:", error);
+      logger.error("Erreur chargement historique:", error);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Calculer les statistiques
   const currentFortune = history[history.length - 1]?.fortune || 0;
   const startFortune = history[0]?.fortune || 0;
   const totalChange = currentFortune - startFortune;
   const percentChange = startFortune > 0 ? ((totalChange / startFortune) * 100).toFixed(1) : 0;
 
-  // Formater les données pour le graphique
   const chartData = history.map(entry => ({
     date: new Date(entry.timestamp).toLocaleDateString('fr-FR', { 
       month: 'short', 
@@ -46,7 +71,6 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
     timestamp: entry.timestamp,
   }));
 
-  // Custom Tooltip
   const CustomTooltip = ({ active, payload }: any) => {
     if (active && payload && payload.length) {
       return (
@@ -69,7 +93,6 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
     );
   }
 
-  // Si pas d'historique
   if (history.length === 0) {
     return (
       <Card>
@@ -81,12 +104,8 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
         </CardHeader>
         <CardContent className="text-center py-8">
           <Calendar className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-50" />
-          <p className="text-muted-foreground">
-            Aucune donnée d'historique disponible
-          </p>
-          <p className="text-xs text-muted-foreground mt-2">
-            Commence à jouer pour voir ton évolution !
-          </p>
+          <p className="text-muted-foreground">Aucune donnée d'historique disponible</p>
+          <p className="text-xs text-muted-foreground mt-2">Commence à jouer pour voir ton évolution !</p>
         </CardContent>
       </Card>
     );
@@ -101,7 +120,6 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
             <CardTitle>Historique de Fortune</CardTitle>
           </div>
           
-          {/* Sélecteur de période */}
           <div className="flex gap-2">
             {[1, 7, 30].map((p) => (
               <button
@@ -196,7 +214,7 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
                 className="flex items-center justify-between p-2 rounded-lg bg-surface-alt text-sm"
               >
                 <div className="flex items-center gap-2">
-                  <div className={`w-1.5 h-1.5 rounded-full ${entry.change > 0 ? 'bg-green-500' : 'bg-red-500'}`} />
+                  <span className="text-xl">{getTransactionIcon(entry.type || "")}</span>
                   <div>
                     <p className="font-medium text-xs">{entry.reason}</p>
                     <p className="text-[10px] text-muted-foreground">
@@ -207,10 +225,23 @@ export function FortuneHistoryCard({ userId }: FortuneHistoryCardProps) {
                         minute: '2-digit',
                       })}
                     </p>
+                    
+                    {/* ✅ Afficher les détails du tournoi si disponibles */}
+                    {entry.metadata?.position && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Position: {entry.metadata.position} • Cagnotte: {entry.metadata.prizePool}€
+                      </p>
+                    )}
+                    
+                    {entry.metadata?.mode === "duo" && entry.metadata?.partnerName && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Avec {entry.metadata.partnerName}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className={`font-bold text-xs ${entry.change > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                  <p className={`font-bold text-xs ${getTransactionColor(entry.change, entry.type || "")}`}>
                     {entry.change > 0 ? '+' : ''}{entry.change}€
                   </p>
                 </div>

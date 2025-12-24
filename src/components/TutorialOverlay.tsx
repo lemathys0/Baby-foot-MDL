@@ -16,6 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { logger } from '@/utils/logger';
 
 // Étapes du tutoriel
 const tutorialSteps = [
@@ -39,7 +40,7 @@ const tutorialSteps = [
     icon: Coins,
     image: '💵',
     tips: [
-      'Gagnez 100€ de départ',
+      'Gagnez 100₣ de départ',
       'Gagnez en jouant des matchs',
       'Pariez sur les matchs',
       'Achetez des items et des boosters'
@@ -65,7 +66,7 @@ const tutorialSteps = [
     icon: Layers,
     image: '🎴',
     tips: [
-      'Ouvrez des boosters (50€)',
+      'Ouvrez des boosters (50₣)',
       'Pack gratuit toutes les 2h',
       'Raretés variées : Bronze à Créateur',
       'Échangez sur le marché'
@@ -105,7 +106,7 @@ const tutorialSteps = [
     image: '🎖️',
     tips: [
       'Chaque jour : 13h - 14h15',
-      'Inscription : 50€ solo / 25€ duo',
+      'Inscription : 50₣ solo / 25₣ duo',
       'Élimination directe',
       'Cagnotte redistribuée aux gagnants'
     ]
@@ -116,7 +117,22 @@ export default function TutorialOverlay({ onComplete }: { onComplete: () => void
   const [currentStep, setCurrentStep] = useState(0);
   const [isVisible, setIsVisible] = useState(true);
 
+  // ✅ Vérification de sécurité pour l'index
+  if (currentStep < 0 || currentStep >= tutorialSteps.length) {
+    logger.error('❌ Index step invalide:', currentStep);
+    setTimeout(() => onComplete(), 0);
+    return null;
+  }
+
   const step = tutorialSteps[currentStep];
+  
+  // ✅ Vérification de sécurité pour le step et l'icône
+  if (!step || !step.icon) {
+    logger.error('❌ Step ou icon manquant:', { currentStep, step });
+    setTimeout(() => onComplete(), 0);
+    return null;
+  }
+
   const isLastStep = currentStep === tutorialSteps.length - 1;
   const isFirstStep = currentStep === 0;
 
@@ -124,13 +140,13 @@ export default function TutorialOverlay({ onComplete }: { onComplete: () => void
     if (isLastStep) {
       handleComplete();
     } else {
-      setCurrentStep(prev => prev + 1);
+      setCurrentStep(prev => Math.min(prev + 1, tutorialSteps.length - 1));
     }
   };
 
   const handlePrevious = () => {
     if (!isFirstStep) {
-      setCurrentStep(prev => prev - 1);
+      setCurrentStep(prev => Math.max(prev - 1, 0));
     }
   };
 
@@ -211,7 +227,7 @@ export default function TutorialOverlay({ onComplete }: { onComplete: () => void
                   transition={{ delay: 0.2 }}
                 >
                   <h2 className="text-2xl font-bold mb-2 flex items-center justify-center gap-2">
-                    <Icon className="h-6 w-6 text-primary" />
+                    {Icon && <Icon className="h-6 w-6 text-primary" />}
                     {step.title}
                   </h2>
                   <p className="text-muted-foreground">{step.description}</p>
@@ -226,7 +242,7 @@ export default function TutorialOverlay({ onComplete }: { onComplete: () => void
                 transition={{ delay: 0.3 }}
                 className="space-y-3 mb-6"
               >
-                {step.tips.map((tip, index) => (
+                {step.tips && step.tips.map((tip, index) => (
                   <motion.div
                     key={index}
                     initial={{ opacity: 0, x: -20 }}

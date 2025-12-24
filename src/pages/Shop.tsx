@@ -8,9 +8,10 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { ref, get } from "firebase/database";
+import { ref, get, onValue } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { SHOP_ITEMS, buyShopItem, equipItem, buyLootbox, type ShopItem } from "@/lib/firebaseExtended";
+import { logger } from '@/utils/logger';
 
 const rarityConfig = {
   common: {
@@ -87,11 +88,11 @@ const ShopPage = () => {
   useEffect(() => {
     if (!user) return;
 
-    const loadUserData = async () => {
+    const userRef = ref(database, `users/${user.uid}`);
+
+    // ✅ Listener temps réel pour synchronisation automatique de la fortune
+    const unsubscribe = onValue(userRef, (snapshot) => {
       try {
-        const userRef = ref(database, `users/${user.uid}`);
-        const snapshot = await get(userRef);
-        
         if (snapshot.exists()) {
           const data = snapshot.val();
           setFortune(data.fortune || 0);
@@ -103,13 +104,14 @@ const ShopPage = () => {
             title: data.title || data.equippedTitle || "",
             effect: data.effect || data.equippedEffect || "",
           });
+          logger.log("✅ [Shop] Fortune mise à jour en temps réel:", data.fortune || 0);
         }
       } catch (error) {
-        console.error("Erreur chargement données:", error);
+        logger.error("Erreur chargement données:", error);
       }
-    };
+    });
 
-    loadUserData();
+    return () => unsubscribe();
   }, [user]);
 
   const filteredAndSortedItems = SHOP_ITEMS

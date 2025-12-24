@@ -7,6 +7,7 @@ import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { getUserBadges, checkAchievements, type Badge as BadgeType } from "@/lib/firebaseExtended";
 import { toast } from "@/hooks/use-toast";
+import { logger } from '@/utils/logger';
 
 interface BadgesSectionProps {
   userId: string;
@@ -85,7 +86,7 @@ export function BadgesSection({ userId }: BadgesSectionProps) {
       const userBadges = await getUserBadges(userId);
       setBadges(userBadges || []);
     } catch (error) {
-      console.error("Erreur chargement badges:", error);
+      logger.error("Erreur chargement badges:", error);
       setBadges([]);
     } finally {
       setIsLoading(false);
@@ -114,7 +115,7 @@ export function BadgesSection({ userId }: BadgesSectionProps) {
         });
       }
     } catch (error) {
-      console.error("Erreur vérification achievements:", error);
+      logger.error("Erreur vérification achievements:", error);
       toast({
         title: "Erreur",
         description: "Impossible de vérifier les achievements",
@@ -307,27 +308,28 @@ export function BadgesSection({ userId }: BadgesSectionProps) {
                 .slice(0, 3)
                 .map((badge) => {
                   const achievement = ACHIEVEMENT_DEFINITIONS.find(a => a.id === badge.id);
+                  if (!achievement) return null;
                   return (
                     <div
                       key={badge.id}
                       className="flex items-center gap-3 p-2 rounded-lg bg-surface-alt"
                     >
-                      <div className="text-2xl">{badge.icon}</div>
+                      <div className="text-2xl">{achievement.icon}</div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium">{badge.name}</p>
+                        <p className="text-sm font-medium">{achievement.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {achievement?.description}
+                          {achievement.description}
                         </p>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {new Date(badge.unlockedAt).toLocaleDateString('fr-FR')}
                         </p>
                       </div>
                       <div className="text-right">
-                        <Badge className={rarityColors[badge.rarity]}>
-                          {rarityLabels[badge.rarity]}
+                        <Badge className={rarityColors[achievement.rarity]}>
+                          {rarityLabels[achievement.rarity]}
                         </Badge>
                         <p className="text-xs text-primary font-bold mt-1">
-                          +{achievement?.reward || 0}€
+                          +{achievement.reward}€
                         </p>
                       </div>
                     </div>

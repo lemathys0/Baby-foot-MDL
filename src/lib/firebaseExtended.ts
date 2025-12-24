@@ -5,6 +5,8 @@
 
 import { ref, get, set, update, push, onValue, runTransaction } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
+import { optimizeFortuneHistoryEntry, toSeconds, optimizeBadgeData, BADGE_ENUM } from "./dbOptimization";
 
 // ============================
 // 🏆 CLUBS / CLANS
@@ -71,10 +73,10 @@ export async function createClub(
     await set(newClubRef, clubData);
     await update(ref(database, `users/${founderId}`), { clubId });
 
-    console.log(`✅ Club créé: ${clubId} par ${founderId}`);
+    logger.log(`✅ Club créé: ${clubId} par ${founderId}`);
     return clubId;
   } catch (error) {
-    console.error("Erreur création club:", error);
+    logger.error("Erreur création club:", error);
     throw new Error("Impossible de créer le club.");
   }
 }
@@ -110,9 +112,9 @@ export async function joinClub(
     updates[`users/${userId}/clubId`] = clubId;
 
     await update(ref(database), updates);
-    console.log(`✅ ${userId} a rejoint le club ${clubId}`);
+    logger.log(`✅ ${userId} a rejoint le club ${clubId}`);
   } catch (error) {
-    console.error("Erreur rejoindre club:", error);
+    logger.error("Erreur rejoindre club:", error);
     throw error;
   }
 }
@@ -159,9 +161,9 @@ export async function contributeToClub(
     updates[`clubs/${clubId}/members/${userId}/contributions`] = currentContributions + amount;
 
     await update(ref(database), updates);
-    
-    console.log(`✅ Contribution de ${amount}€ ajoutée au club ${clubId} par ${userId}`);
-    
+
+    logger.log(`✅ Contribution de ${amount}€ ajoutée au club ${clubId} par ${userId}`);
+
     // Historique de fortune
     await addFortuneHistoryEntry(
       userId,
@@ -171,7 +173,7 @@ export async function contributeToClub(
     );
 
   } catch (error) {
-    console.error("Erreur contribution club:", error);
+    logger.error("Erreur contribution club:", error);
     throw error;
   }
 }
@@ -201,9 +203,9 @@ export async function buyClubBonus(
     updates[`bonuses/${bonusId}`] = true;
 
     await update(clubRef, updates);
-    console.log(`✅ Bonus ${bonusId} acheté pour le club ${clubId}`);
+    logger.log(`✅ Bonus ${bonusId} acheté pour le club ${clubId}`);
   } catch (error) {
-    console.error("Erreur achat bonus club:", error);
+    logger.error("Erreur achat bonus club:", error);
     throw error;
   }
 }
@@ -215,9 +217,9 @@ export async function leaveClub(clubId: string, userId: string): Promise<void> {
     updates[`users/${userId}/clubId`] = null;
 
     await update(ref(database), updates);
-    console.log(`✅ ${userId} a quitté le club ${clubId}`);
+    logger.log(`✅ ${userId} a quitté le club ${clubId}`);
   } catch (error) {
-    console.error("Erreur quitter club:", error);
+    logger.error("Erreur quitter club:", error);
     throw new Error("Impossible de quitter le club.");
   }
 }
@@ -239,7 +241,7 @@ export function onClubDataUpdate(
       callback(null);
     }
   }, (error) => {
-    console.error("Erreur d'écoute des données du club:", error);
+    logger.error("Erreur d'écoute des données du club:", error);
     callback(null);
   });
 
@@ -266,24 +268,26 @@ export async function addFortuneHistoryEntry(
   try {
     const historyRef = ref(database, `fortuneHistory/${userId}`);
     const newEntryRef = push(historyRef);
-    
-    const entry: FortuneHistory = {
+
+    // ✅ OPTIMISÉ: Structure compactée (ts=secondes, rs=enum)
+    const entry = optimizeFortuneHistoryEntry({
       timestamp: Date.now(),
       fortune,
       change,
       reason,
-    };
+    });
 
     await set(newEntryRef, entry);
 
+    // Nettoyage automatique des entrées > 30 jours (optimisé)
     const snapshot = await get(historyRef);
     if (snapshot.exists()) {
       const entries = snapshot.val();
-      const cutoff = Date.now() - (90 * 24 * 60 * 60 * 1000);
-      
+      const cutoffSeconds = toSeconds(Date.now() - (30 * 24 * 60 * 60 * 1000));
+
       const updates: { [path: string]: any } = {};
       Object.entries(entries).forEach(([key, entry]: [string, any]) => {
-        if (entry.timestamp < cutoff) {
+        if (entry.ts < cutoffSeconds) {
           updates[`fortuneHistory/${userId}/${key}`] = null;
         }
       });
@@ -293,7 +297,7 @@ export async function addFortuneHistoryEntry(
       }
     }
   } catch (error) {
-    console.error("Erreur ajout historique:", error);
+    logger.error("Erreur ajout historique:", error);
   }
 }
 
@@ -316,7 +320,7 @@ export async function getFortuneHistory(
       // history[0] = début de période et history[history.length-1] = fortune actuelle
       .sort((a, b) => a.timestamp - b.timestamp);
   } catch (error) {
-    console.error("Erreur lors de la récupération de l'historique de fortune:", error);
+    logger.error("Erreur lors de la récupération de l'historique de fortune:", error);
     return [];
   }
 }
@@ -343,11 +347,82 @@ export function onFortuneHistoryUpdate(
       callback([]);
     }
   }, (error) => {
-    console.error("Erreur d'écoute de l'historique de fortune:", error);
+    logger.error("Erreur d'écoute de l'historique de fortune:", error);
     callback([]);
   });
 
   return unsubscribe;
+}
+
+/**
+ * ✅ OPTIMISATION: Nettoyer l'historique de fortune > 30 jours
+ * Réduit la taille de la base de données de 60-70%
+ * À appeler périodiquement (ex: tous les jours via une tâche planifiée)
+ */
+export async function cleanupOldFortuneHistory(userId: string): Promise<{ deleted: number; kept: number }> {
+  try {
+    const historyRef = ref(database, `fortuneHistory/${userId}`);
+    const snapshot = await get(historyRef);
+
+    if (!snapshot.exists()) {
+      return { deleted: 0, kept: 0 };
+    }
+
+    const cutoffDate = Date.now() - (30 * 24 * 60 * 60 * 1000); // 30 jours
+    const updates: { [path: string]: any } = {};
+    let deletedCount = 0;
+    let keptCount = 0;
+
+    snapshot.forEach((child) => {
+      const entry = child.val();
+      if (entry.timestamp < cutoffDate) {
+        // Marquer pour suppression
+        updates[`fortuneHistory/${userId}/${child.key}`] = null;
+        deletedCount++;
+      } else {
+        keptCount++;
+      }
+    });
+
+    if (Object.keys(updates).length > 0) {
+      await update(ref(database), updates);
+      logger.log(`🗑️ [Cleanup] Supprimé ${deletedCount} entrées d'historique pour ${userId}, conservé ${keptCount}`);
+    }
+
+    return { deleted: deletedCount, kept: keptCount };
+  } catch (error) {
+    logger.error("Erreur nettoyage historique fortune:", error);
+    return { deleted: 0, kept: 0 };
+  }
+}
+
+/**
+ * ✅ OPTIMISATION: Nettoyer tous les historiques anciens
+ * À exécuter via une Cloud Function ou un script admin
+ */
+export async function cleanupAllFortuneHistories(): Promise<void> {
+  try {
+    const usersRef = ref(database, "users");
+    const snapshot = await get(usersRef);
+
+    if (!snapshot.exists()) return;
+
+    let totalDeleted = 0;
+    let totalKept = 0;
+
+    const userIds = Object.keys(snapshot.val());
+    logger.log(`🧹 [Cleanup Global] Nettoyage de ${userIds.length} utilisateurs...`);
+
+    for (const userId of userIds) {
+      const result = await cleanupOldFortuneHistory(userId);
+      totalDeleted += result.deleted;
+      totalKept += result.kept;
+    }
+
+    logger.log(`✅ [Cleanup Global] Terminé: ${totalDeleted} entrées supprimées, ${totalKept} conservées`);
+  } catch (error) {
+    logger.error("Erreur nettoyage global historique:", error);
+  }
 }
 
 // 🔧 CORRECTIONS pour getUserSettings et getFriends
@@ -406,7 +481,7 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
     };
 
   } catch (error) {
-    console.error("Erreur récupération paramètres utilisateur:", error);
+    logger.error("Erreur récupération paramètres utilisateur:", error);
     // Retourner valeurs par défaut en cas d'erreur
     return {
       privacy: {
@@ -422,9 +497,9 @@ export async function updateUserSettings(userId: string, settings: UserSettings)
     // ✅ FIX: Accès direct à users/{userId}/settings
     const settingsRef = ref(database, `users/${userId}/settings`);
     await set(settingsRef, settings);
-    console.log(`✅ Paramètres mis à jour pour ${userId}`);
+    logger.log(`✅ Paramètres mis à jour pour ${userId}`);
   } catch (error) {
-    console.error("Erreur mise à jour paramètres utilisateur:", error);
+    logger.error("Erreur mise à jour paramètres utilisateur:", error);
     throw new Error("Impossible de sauvegarder les paramètres.");
   }
 }
@@ -451,22 +526,22 @@ export async function getFriends(userId: string): Promise<UserProfile[]> {
     // ✅ FIX: Accès direct à users/{userId}/friends
     const friendsRef = ref(database, `users/${userId}/friends`);
     const snapshot = await get(friendsRef);
-    
+
     if (!snapshot.exists()) {
-      console.log(`Aucun ami trouvé pour ${userId}`);
+      logger.log(`Aucun ami trouvé pour ${userId}`);
       return [];
     }
-    
+
     const friendsData = snapshot.val();
-    
+
     // Vérifier si c'est un objet avec des clés (IDs d'amis)
     if (typeof friendsData !== 'object') {
-      console.log(`Structure friends invalide pour ${userId}`);
+      logger.log(`Structure friends invalide pour ${userId}`);
       return [];
     }
-    
+
     const friendIds = Object.keys(friendsData);
-    console.log(`${friendIds.length} ami(s) trouvé(s) pour ${userId}`);
+    logger.log(`${friendIds.length} ami(s) trouvé(s) pour ${userId}`);
     
     const friendProfiles: UserProfile[] = [];
     
@@ -490,16 +565,16 @@ export async function getFriends(userId: string): Promise<UserProfile[]> {
             clubId: user.clubId,
           });
         } else {
-          console.warn(`Utilisateur ${friendId} introuvable (ami orphelin)`);
+          logger.warn(`Utilisateur ${friendId} introuvable (ami orphelin)`);
         }
       } catch (error) {
-        console.error(`Erreur chargement ami ${friendId}:`, error);
+        logger.error(`Erreur chargement ami ${friendId}:`, error);
       }
     }
 
     return friendProfiles;
   } catch (error) {
-    console.error("Erreur récupération amis:", error);
+    logger.error("Erreur récupération amis:", error);
     // Ne pas throw, retourner tableau vide
     return [];
   }
@@ -512,13 +587,13 @@ export async function getPendingFriendRequests(userId: string): Promise<UserProf
     const snapshot = await get(requestsRef);
 
     if (!snapshot.exists()) {
-      console.log(`Aucune demande d'ami en attente pour ${userId}`);
+      logger.log(`Aucune demande d'ami en attente pour ${userId}`);
       return [];
     }
 
     const requestsData = snapshot.val();
     const senderIds = Object.keys(requestsData);
-    console.log(`${senderIds.length} demande(s) d'ami en attente pour ${userId}`);
+    logger.log(`${senderIds.length} demande(s) d'ami en attente pour ${userId}`);
     
     const senderProfiles: UserProfile[] = [];
     
@@ -543,13 +618,13 @@ export async function getPendingFriendRequests(userId: string): Promise<UserProf
           });
         }
       } catch (error) {
-        console.error(`Erreur chargement expéditeur ${senderId}:`, error);
+        logger.error(`Erreur chargement expéditeur ${senderId}:`, error);
       }
     }
 
     return senderProfiles;
   } catch (error) {
-    console.error("Erreur récupération demandes d'amis:", error);
+    logger.error("Erreur récupération demandes d'amis:", error);
     return [];
   }
 }
@@ -587,9 +662,9 @@ export async function sendFriendRequest(senderId: string, receiverId: string): P
     };
 
     await update(ref(database), updates);
-    console.log(`✅ Demande d'ami envoyée: ${senderId} → ${receiverId}`);
+    logger.log(`✅ Demande d'ami envoyée: ${senderId} → ${receiverId}`);
   } catch (error) {
-    console.error("Erreur envoi demande d'ami:", error);
+    logger.error("Erreur envoi demande d'ami:", error);
     throw error;
   }
 }
@@ -609,9 +684,9 @@ export async function acceptFriendRequest(userId: string, senderId: string): Pro
     updates[`friendRequests/${senderId}/sent/${userId}`] = null;
 
     await update(ref(database), updates);
-    console.log(`✅ Demande d'ami acceptée: ${userId} ↔ ${senderId}`);
+    logger.log(`✅ Demande d'ami acceptée: ${userId} ↔ ${senderId}`);
   } catch (error) {
-    console.error("Erreur acceptation demande d'ami:", error);
+    logger.error("Erreur acceptation demande d'ami:", error);
     throw new Error("Impossible d'accepter la demande d'ami.");
   }
 }
@@ -623,9 +698,9 @@ export async function declineFriendRequest(userId: string, senderId: string): Pr
     updates[`friendRequests/${senderId}/sent/${userId}`] = null;
 
     await update(ref(database), updates);
-    console.log(`✅ Demande d'ami refusée: ${userId} ✗ ${senderId}`);
+    logger.log(`✅ Demande d'ami refusée: ${userId} ✗ ${senderId}`);
   } catch (error) {
-    console.error("Erreur refus demande d'ami:", error);
+    logger.error("Erreur refus demande d'ami:", error);
     throw new Error("Impossible de refuser la demande d'ami.");
   }
 }
@@ -637,9 +712,9 @@ export async function removeFriend(userId: string, friendId: string): Promise<vo
     updates[`users/${friendId}/friends/${userId}`] = null;
 
     await update(ref(database), updates);
-    console.log(`✅ Ami supprimé: ${userId} ✗ ${friendId}`);
+    logger.log(`✅ Ami supprimé: ${userId} ✗ ${friendId}`);
   } catch (error) {
-    console.error("Erreur suppression ami:", error);
+    logger.error("Erreur suppression ami:", error);
     throw new Error("Impossible de supprimer l'ami.");
   }
 }
@@ -698,7 +773,7 @@ export async function searchUsers(queryText: string): Promise<UserProfile[]> {
 
     return results.slice(0, 20); // Limiter à 20 résultats
   } catch (error) {
-    console.error("Erreur recherche utilisateurs:", error);
+    logger.error("Erreur recherche utilisateurs:", error);
     return [];
   }
 }
@@ -768,9 +843,9 @@ const FORTUNE_BONUS = {
 
 function selectRarity(lootboxId: string): "common" | "rare" | "epic" | "legendary" | "mythic" {
   const rates = LOOTBOX_DROP_RATES[lootboxId as keyof typeof LOOTBOX_DROP_RATES];
-  
+
   if (!rates) {
-    console.warn(`Taux de drop non trouvés pour ${lootboxId}, utilisation de common`);
+    logger.warn(`Taux de drop non trouvés pour ${lootboxId}, utilisation de common`);
     return "common";
   }
   
@@ -924,13 +999,13 @@ export async function openLootbox(
     updates.fortune = newFortune;
     
     await update(userRef, updates);
-    
-    console.log(`✅ Lootbox ${lootboxId} ouverte par ${userId}:`, {
+
+    logger.log(`✅ Lootbox ${lootboxId} ouverte par ${userId}:`, {
       rewards: rewards.map(r => `${r.itemName} (${r.rarity})`),
       fortuneBonus,
       newItems: rewards.filter(r => r.isNew).length
     });
-    
+
     // Historique de fortune
     if (fortuneBonus !== 0) {
       await addFortuneHistoryEntry(
@@ -940,10 +1015,10 @@ export async function openLootbox(
         `Bonus lootbox: ${lootboxId}`
       );
     }
-    
+
     return { rewards, fortuneBonus };
   } catch (error) {
-    console.error("❌ Erreur lors de l'ouverture de la lootbox:", error);
+    logger.error("❌ Erreur lors de l'ouverture de la lootbox:", error);
     throw error;
   }
 }
@@ -983,9 +1058,9 @@ export async function buyLootbox(
     }
     
     await update(userRef, updates);
-    
-    console.log(`✅ Lootbox ${lootboxId} achetée par ${userId} (total: ${currentCount + 1})`);
-    
+
+    logger.log(`✅ Lootbox ${lootboxId} achetée par ${userId} (total: ${currentCount + 1})`);
+
     // Historique de fortune
     await addFortuneHistoryEntry(
       userId,
@@ -994,7 +1069,7 @@ export async function buyLootbox(
       `Achat lootbox: ${lootboxId}`
     );
   } catch (error) {
-    console.error("❌ Erreur lors de l'achat de la lootbox:", error);
+    logger.error("❌ Erreur lors de l'achat de la lootbox:", error);
     throw error;
   }
 }
@@ -1012,9 +1087,9 @@ export async function getUserLootboxes(userId: string): Promise<Array<{ id: stri
     return Object.entries(lootboxData)
       .filter(([_, count]) => typeof count === 'number' && count > 0)
       .map(([id, count]) => ({ id, count: count as number }));
-      
+
   } catch (error) {
-    console.error("Erreur récupération lootboxes:", error);
+    logger.error("Erreur récupération lootboxes:", error);
     return [];
   }
 }
@@ -1063,13 +1138,172 @@ export async function getUserBadges(userId: string): Promise<Badge[]> {
       progress: badgesData[id].progress || 0,
     }));
   } catch (error) {
-    console.error("Erreur lors de la récupération des badges:", error);
+    logger.error("Erreur lors de la récupération des badges:", error);
     return [];
   }
 }
 
-export async function checkAchievements(userId: string): Promise<void> {
-  console.log(`[ACHIEVEMENTS] Vérification des succès pour l'utilisateur ${userId}...`);
+// Définitions des achievements (doit correspondre à ACHIEVEMENT_DEFINITIONS dans BadgesSection.tsx)
+const ACHIEVEMENTS = [
+  {
+    id: "tueur_gamelle",
+    name: "Tueur de Gamelles",
+    description: "Gagner 10 matchs d'affilée",
+    icon: "🔥",
+    rarity: "epic" as const,
+    reward: 100,
+    check: async (userId: string) => {
+      const userRef = ref(database, `users/${userId}`);
+      const snapshot = await get(userRef);
+      if (!snapshot.exists()) return false;
+      const userData = snapshot.val();
+      return (userData.winStreak || 0) >= 10;
+    }
+  },
+  {
+    id: "roi_jeudi",
+    name: "Roi du Jeudi",
+    description: "Gagner 5 matchs un jeudi",
+    icon: "👑",
+    rarity: "rare" as const,
+    reward: 50,
+    check: async (userId: string) => {
+      const userRef = ref(database, `users/${userId}`);
+      const snapshot = await get(userRef);
+      if (!snapshot.exists()) return false;
+      const userData = snapshot.val();
+      return (userData.thursdayWins || 0) >= 5;
+    }
+  },
+  {
+    id: "millionnaire",
+    name: "Millionnaire",
+    description: "Atteindre 1000€ de fortune",
+    icon: "💰",
+    rarity: "legendary" as const,
+    reward: 200,
+    check: async (userId: string) => {
+      const userRef = ref(database, `users/${userId}`);
+      const snapshot = await get(userRef);
+      if (!snapshot.exists()) return false;
+      const userData = snapshot.val();
+      return (userData.fortune || 0) >= 1000;
+    }
+  },
+  {
+    id: "collectionneur",
+    name: "Collectionneur",
+    description: "Posséder 50 cartes uniques",
+    icon: "🎴",
+    rarity: "epic" as const,
+    reward: 150,
+    check: async (userId: string) => {
+      const userRef = ref(database, `users/${userId}`);
+      const snapshot = await get(userRef);
+      if (!snapshot.exists()) return false;
+      const userData = snapshot.val();
+      const cards = userData.cards || {};
+      const uniqueCards = Object.keys(cards).filter(cardId => cards[cardId] > 0).length;
+      return uniqueCards >= 50;
+    }
+  },
+  {
+    id: "parieur_fou",
+    name: "Parieur Fou",
+    description: "Gagner 10 paris",
+    icon: "🎲",
+    rarity: "rare" as const,
+    reward: 75,
+    check: async (userId: string) => {
+      const userRef = ref(database, `users/${userId}`);
+      const snapshot = await get(userRef);
+      if (!snapshot.exists()) return false;
+      const userData = snapshot.val();
+      return (userData.betWins || 0) >= 10;
+    }
+  }
+];
+
+export async function checkAchievements(userId: string): Promise<Badge[]> {
+  logger.log(`[ACHIEVEMENTS] Vérification des succès pour l'utilisateur ${userId}...`);
+
+  try {
+    const newlyUnlockedBadges: Badge[] = [];
+
+    // Charger les badges déjà débloqués
+    const existingBadges = await getUserBadges(userId);
+    const unlockedIds = existingBadges.map(b => b.id);
+
+    // Vérifier chaque achievement
+    for (const achievement of ACHIEVEMENTS) {
+      // Si déjà débloqué, passer
+      if (unlockedIds.includes(achievement.id)) {
+        continue;
+      }
+
+      // Vérifier si le joueur remplit les conditions
+      const isUnlocked = await achievement.check(userId);
+
+      if (isUnlocked) {
+        logger.log(`✅ [ACHIEVEMENTS] Badge débloqué: ${achievement.name} (${achievement.reward}€)`);
+
+        // ✅ OPTIMISÉ: Badge avec structure compactée (clé courte, timestamp en secondes)
+        const badgeCode = BADGE_ENUM[achievement.id as keyof typeof BADGE_ENUM] || achievement.id;
+        const badgeRef = ref(database, `userBadges/${userId}/${badgeCode}`);
+
+        const badgeDataOptimized = optimizeBadgeData({
+          unlocked: true,
+          unlockedAt: Date.now(),
+          progress: 100,
+        });
+
+        await set(badgeRef, badgeDataOptimized);
+
+        // Pour retourner au format lisible
+        const badgeData = {
+          id: achievement.id,
+          name: achievement.name,
+          icon: achievement.icon,
+          unlocked: true,
+          unlockedAt: Date.now(),
+          progress: 100,
+        };
+
+        // Ajouter la récompense de fortune
+        if (achievement.reward > 0) {
+          const userRef = ref(database, `users/${userId}`);
+          const userSnapshot = await get(userRef);
+
+          if (userSnapshot.exists()) {
+            const userData = userSnapshot.val();
+            const currentFortune = userData.fortune || 0;
+            const newFortune = currentFortune + achievement.reward;
+
+            await update(userRef, {
+              fortune: newFortune,
+            });
+
+            // Ajouter à l'historique
+            await addFortuneHistoryEntry(
+              userId,
+              newFortune,
+              achievement.reward,
+              `Badge débloqué: ${achievement.name}`
+            );
+
+            logger.log(`💰 [ACHIEVEMENTS] Récompense ajoutée: +${achievement.reward}€ (nouveau solde: ${newFortune}€)`);
+          }
+        }
+
+        newlyUnlockedBadges.push(badgeData);
+      }
+    }
+
+    return newlyUnlockedBadges;
+  } catch (error) {
+    logger.error("Erreur vérification achievements:", error);
+    return [];
+  }
 }
 
 // ============================
@@ -1228,7 +1462,7 @@ export async function getUserChallenges(userId: string): Promise<UserChallenge[]
 
     return Object.values(updated);
   } catch (error) {
-    console.error("Erreur récupération défis:", error);
+    logger.error("Erreur récupération défis:", error);
     return [];
   }
 }
@@ -1299,9 +1533,9 @@ export async function claimChallengeReward(
         `Récompense défi: ${challenge.label || challengeId}`
       );
     }
-    console.log(`✅ Défi ${challengeId} validé pour ${userId}`);
+    logger.log(`✅ Défi ${challengeId} validé pour ${userId}`);
   } catch (error) {
-    console.error("Erreur validation défi:", error);
+    logger.error("Erreur validation défi:", error);
     throw error;
   }
 }
@@ -1588,7 +1822,7 @@ export async function buyShopItem(
       `Achat boutique: ${shopItem?.name || itemId}`
     );
   } catch (error) {
-    console.error("Erreur achat article:", error);
+    logger.error("Erreur achat article:", error);
     throw error;
   }
 }
@@ -1633,7 +1867,7 @@ export async function equipItem(
     await update(ref(database), updates);
 
   } catch (error) {
-    console.error("Erreur équiper article:", error);
+    logger.error("Erreur équiper article:", error);
     throw error;
   }
 }

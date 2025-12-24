@@ -27,6 +27,7 @@ import { createCardListing } from "@/lib/firebaseMarket";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { getAvailableSeasons, getSeasonDisplayName } from "@/lib/cardSystem";
+import { addFortuneHistoryEntry } from "@/lib/firebaseExtended";
 
 // --- Types et Constantes ---
 type Rarity = "bronze" | "silver" | "gold" | "espoir" | "icone" | "future-star" | "god" | "creator" | "unknown";
@@ -213,14 +214,25 @@ const BabyDex = () => {
       setPulledCards(newCards.sort((a, b) => rarityOrder[getRarityCategory(a.rarity)] - rarityOrder[getRarityCategory(b.rarity)]));
       setCurrentCardIndex(0);
       
-      const updates: any = isFree 
-        ? { lastFreeBooster: Date.now() } 
+      const updates: any = isFree
+        ? { lastFreeBooster: Date.now() }
         : { fortune: fortune - BOOSTER_COST };
-      
+
       await update(ref(database, `users/${user.uid}`), updates);
-      
-      if (!isFree) setFortune(prev => prev - BOOSTER_COST);
-      else setLastFreeBooster(Date.now());
+
+      // Enregistrer dans l'historique si c'est un achat payant
+      if (!isFree) {
+        const newFortune = fortune - BOOSTER_COST;
+        await addFortuneHistoryEntry(
+          user.uid,
+          newFortune,
+          -BOOSTER_COST,
+          `Achat de booster (${getSeasonDisplayName(selectedSeason)})`
+        );
+        setFortune(prev => prev - BOOSTER_COST);
+      } else {
+        setLastFreeBooster(Date.now());
+      }
       
       await loadData();
     } catch (error) {

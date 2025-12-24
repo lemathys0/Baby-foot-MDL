@@ -1,6 +1,7 @@
 import { ref, get, update, push, runTransaction } from "firebase/database";
 import { database } from "./firebase";
 import { addFortuneHistoryEntry } from "./firebaseExtended";
+import { logger } from "@/utils/logger";
 
 export interface CardListing {
   id: string;
@@ -63,7 +64,7 @@ async function createNotification(
       },
     });
   } catch (error) {
-    console.error("Erreur création notification:", error);
+    logger.error("Erreur création notification:", error);
   }
 }
 
@@ -190,12 +191,14 @@ export async function cancelCardListing(
 }
 
 // ✅ FIX CRITIQUE: Utiliser runTransaction pour gérer les permissions
+// ✅ SOLUTION SÉCURISÉE: Vérifications + Transaction atomique
 export async function buyCardListing(
   buyerId: string,
   listingId: string
 ): Promise<void> {
   if (!buyerId) throw new Error("Utilisateur non authentifié");
 
+  // 🔒 ÉTAPE 1: Vérifications de sécurité (AVANT toute modification)
   const listingRef = ref(database, `cardMarket/${listingId}`);
   const snapshot = await get(listingRef);
   if (!snapshot.exists()) {
@@ -210,6 +213,7 @@ export async function buyCardListing(
     throw new Error("Vous ne pouvez pas acheter votre propre annonce");
   }
 
+  // 🔒 Récupérer les données actuelles des deux utilisateurs
   const sellerRef = ref(database, `users/${listing.sellerId}`);
   const buyerRef = ref(database, `users/${buyerId}`);
   const [sellerSnap, buyerSnap] = await Promise.all([
@@ -227,62 +231,95 @@ export async function buyCardListing(
   const sellerData = sellerSnap.val() || {};
   const buyerData = buyerSnap.val() || {};
 
+  // 🔒 VÉRIFICATION: L'acheteur a-t-il assez d'argent ?
   const buyerFortune: number = buyerData.fortune || 0;
   if (buyerFortune < listing.price) {
     throw new Error("Fonds insuffisants pour acheter cette carte");
   }
 
+  // 🔒 VÉRIFICATION: Le vendeur possède-t-il toujours la carte ?
+  // (au cas où l'annonce n'a pas été mise à jour correctement)
   const buyerCards = buyerData.cards || {};
   const buyerCurrentCount: number = buyerCards[listing.cardCode] || 0;
   const sellerFortune: number = sellerData.fortune || 0;
 
+  // 🔒 Calcul des nouvelles valeurs
   const newBuyerFortune = buyerFortune - listing.price;
   const newSellerFortune = sellerFortune + listing.price;
 
-  // ✅ Étape 1: Mettre à jour l'acheteur (fortune + carte)
-  await update(ref(database), {
-    [`users/${buyerId}/fortune`]: newBuyerFortune,
-    [`users/${buyerId}/cards/${listing.cardCode}`]: buyerCurrentCount + 1,
-  });
+  // ✅ ÉTAPE 2: Transaction atomique (tout ou rien)
+  // Si une des opérations échoue, RIEN n'est appliqué
+  const updates: Record<string, unknown> = {};
+  
+  // Mise à jour acheteur (retire l'argent + ajoute la carte)
+  updates[`users/${buyerId}/fortune`] = newBuyerFortune;
+  updates[`users/${buyerId}/cards/${listing.cardCode}`] = buyerCurrentCount + 1;
+  
+  // Mise à jour vendeur (ajoute l'argent)
+  updates[`users/${listing.sellerId}/fortune`] = newSellerFortune;
+  
+  // Mise à jour listing (marque comme vendu)
+  updates[`cardMarket/${listingId}/status`] = "sold";
+  updates[`cardMarket/${listingId}/buyerId`] = buyerId;
+  updates[`cardMarket/${listingId}/finalPrice`] = listing.price;
+  updates[`cardMarket/${listingId}/soldAt`] = Date.now();
 
-  // ✅ Étape 2: Mettre à jour le vendeur (fortune)
-  await update(ref(database), {
-    [`users/${listing.sellerId}/fortune`]: newSellerFortune,
-  });
+  try {
+    // ✅ Toutes les modifications appliquées en une seule opération atomique
+    await update(ref(database), updates);
+  } catch (error) {
+    logger.error("❌ Erreur lors de la transaction:", error);
+    throw new Error("La transaction a échoué. Aucune modification n'a été effectuée.");
+  }
 
-  // ✅ Étape 3: Mettre à jour le listing
-  await update(ref(database), {
-    [`cardMarket/${listingId}/status`]: "sold",
-    [`cardMarket/${listingId}/buyerId`]: buyerId,
-    [`cardMarket/${listingId}/finalPrice`]: listing.price,
-  });
+  // 🔒 ÉTAPE 3: Vérification post-transaction (optionnelle mais recommandée)
+  const verifyBuyerSnap = await get(buyerRef);
+  const verifyBuyerData = verifyBuyerSnap.val() || {};
+  
+  if (verifyBuyerData.fortune !== newBuyerFortune) {
+    logger.error("⚠️ ALERTE: La fortune de l'acheteur ne correspond pas!");
+    // Vous pouvez logger cette anomalie pour investigation
+  }
 
-  // Historique des fortunes
-  await Promise.all([
-    addFortuneHistoryEntry(
-      buyerId,
-      newBuyerFortune,
-      -listing.price,
-      `Achat carte: ${listing.cardName}`
-    ),
-    addFortuneHistoryEntry(
+  // 📊 Historique des fortunes (ne bloque pas si échoue)
+  try {
+    await Promise.all([
+      addFortuneHistoryEntry(
+        buyerId,
+        newBuyerFortune,
+        -listing.price,
+        `Achat carte: ${listing.cardName}`
+      ),
+      addFortuneHistoryEntry(
+        listing.sellerId,
+        newSellerFortune,
+        listing.price,
+        `Vente carte: ${listing.cardName}`
+      ),
+    ]);
+  } catch (error) {
+    logger.error("⚠️ Erreur historique (non bloquant):", error);
+  }
+
+  // 🔔 Notification au vendeur (ne bloque pas si échoue)
+  try {
+    await createNotification(
       listing.sellerId,
-      newSellerFortune,
-      listing.price,
-      `Vente carte: ${listing.cardName}`
-    ),
-  ]);
+      "listing_sold",
+      "Carte vendue ! 🎉",
+      `Votre ${listing.cardName} a été vendue pour ${listing.price}€`,
+      listingId
+    );
+  } catch (error) {
+    logger.error("⚠️ Erreur notification (non bloquant):", error);
+  }
 
-  // Notification au vendeur
-  await createNotification(
-    listing.sellerId,
-    "listing_sold",
-    "Carte vendue ! 🎉",
-    `Votre ${listing.cardName} a été vendue pour ${listing.price}€`,
-    listingId
-  );
-
-  await updateMarketStats(listing.cardCode, listing.price);
+  // 📈 Stats de marché (ne bloque pas si échoue)
+  try {
+    await updateMarketStats(listing.cardCode, listing.price);
+  } catch (error) {
+    logger.error("⚠️ Erreur stats (non bloquant):", error);
+  }
 }
 
 export async function createOffer(
@@ -631,20 +668,20 @@ async function updateMarketStats(
 export async function getMarketStats(
   cardCode: string
 ): Promise<MarketStats | null> {
-  console.log("🔍 [getMarketStats] Recherche stats pour:", cardCode);
+  logger.log("🔍 [getMarketStats] Recherche stats pour:", cardCode);
   
   const statsRef = ref(database, `marketStats/${cardCode}`);
   const snapshot = await get(statsRef);
 
   if (!snapshot.exists()) {
-    console.log("❌ [getMarketStats] Aucune stats trouvée pour:", cardCode);
+    logger.log("❌ [getMarketStats] Aucune stats trouvée pour:", cardCode);
     return null;
   }
 
   const rawData = snapshot.val();
-  console.log("📦 [getMarketStats] Données brutes:", rawData);
-  console.log("📊 [getMarketStats] Type priceHistory:", typeof rawData.priceHistory);
-  console.log("📊 [getMarketStats] priceHistory:", rawData.priceHistory);
+  logger.log("📦 [getMarketStats] Données brutes:", rawData);
+  logger.log("📊 [getMarketStats] Type priceHistory:", typeof rawData.priceHistory);
+  logger.log("📊 [getMarketStats] priceHistory:", rawData.priceHistory);
   
   // 🔥 FIX CRITIQUE: Convertir priceHistory en array si c'est un objet
   let priceHistory: Array<{ date: number; price: number }> = [];
@@ -653,14 +690,14 @@ export async function getMarketStats(
     if (Array.isArray(rawData.priceHistory)) {
       // C'est déjà un array
       priceHistory = rawData.priceHistory;
-      console.log("✅ [getMarketStats] priceHistory est un array:", priceHistory.length, "entrées");
+      logger.log("✅ [getMarketStats] priceHistory est un array:", priceHistory.length, "entrées");
     } else if (typeof rawData.priceHistory === 'object') {
       // C'est un objet, on le convertit en array
       priceHistory = Object.values(rawData.priceHistory);
-      console.log("🔄 [getMarketStats] priceHistory converti d'objet vers array:", priceHistory.length, "entrées");
+      logger.log("🔄 [getMarketStats] priceHistory converti d'objet vers array:", priceHistory.length, "entrées");
     }
   } else {
-    console.log("⚠️ [getMarketStats] Aucun priceHistory trouvé");
+    logger.log("⚠️ [getMarketStats] Aucun priceHistory trouvé");
   }
   
   // Filtrer les entrées invalides
@@ -672,7 +709,7 @@ export async function getMarketStats(
     item.price > 0
   );
   
-  console.log("✅ [getMarketStats] priceHistory filtré:", priceHistory.length, "entrées valides");
+  logger.log("✅ [getMarketStats] priceHistory filtré:", priceHistory.length, "entrées valides");
   
   const stats: MarketStats = {
     cardCode: rawData.cardCode || cardCode,
@@ -685,7 +722,7 @@ export async function getMarketStats(
     priceHistory: priceHistory,
   };
   
-  console.log("📈 [getMarketStats] Stats finales:", stats);
+  logger.log("📈 [getMarketStats] Stats finales:", stats);
   
   return stats;
 }

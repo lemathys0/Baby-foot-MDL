@@ -12,6 +12,7 @@ import { ref, update, onValue, off } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { Bell, Check, X, MessageSquare, DollarSign } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { logger } from '@/utils/logger';
 
 export interface Notification {
   id: string;
@@ -65,7 +66,7 @@ export const NotificationSystem = () => {
         window.focus();
         notification.close();
         if (notif.relatedId) {
-          console.log("Navigation vers:", notif.relatedId);
+          logger.log("Navigation vers:", notif.relatedId);
         }
       };
     }
@@ -131,7 +132,7 @@ export const NotificationSystem = () => {
         [`notifications/${user.uid}/${notificationId}/read`]: true,
       });
     } catch (error) {
-      console.error("Erreur marquage notification:", error);
+      logger.error("Erreur marquage notification:", error);
     }
   };
 
@@ -148,7 +149,7 @@ export const NotificationSystem = () => {
         await update(ref(database), updates);
       }
     } catch (error) {
-      console.error("Erreur marquage toutes notifications:", error);
+      logger.error("Erreur marquage toutes notifications:", error);
     }
   };
 
@@ -159,7 +160,7 @@ export const NotificationSystem = () => {
         [`notifications/${user.uid}/${notificationId}`]: null,
       });
     } catch (error) {
-      console.error("Erreur suppression notification:", error);
+      logger.error("Erreur suppression notification:", error);
     }
   };
 
@@ -240,7 +241,7 @@ export const NotificationSystem = () => {
               {notifications.map((notif) => {
                 // ✅ Vérification de sécurité supplémentaire
                 if (!notif || !notif.type) {
-                  console.warn('Notification invalide détectée:', notif);
+                  logger.warn('Notification invalide détectée:', notif);
                   return null;
                 }
 
@@ -328,6 +329,6 @@ export async function createNotification(
       [`notifications/${userId}/${newNotifKey}`]: notification,
     });
   } catch (error) {
-    console.error("Erreur création notification:", error);
+    logger.error("Erreur création notification:", error);
   }
 }

@@ -31,6 +31,7 @@ import {
   type MarketStats,
 } from "@/lib/firebaseMarket";
 import { motion } from "framer-motion";
+import { logger } from '@/utils/logger';
 import {
   Coins,
   XCircle,
@@ -95,7 +96,7 @@ const CardMarketImage = ({ cardCode, cardName, className }: CardMarketImageProps
         alt={cardName}
         className="w-full h-full object-cover"
         onError={() => {
-          console.warn(`⚠️ Image marché introuvable: ${imagePath}`);
+          logger.warn(`⚠️ Image marché introuvable: ${imagePath}`);
           setImageError(true);
         }}
         loading="lazy"
@@ -142,7 +143,7 @@ const CardMarket = () => {
       });
       setMarketStats(statsMap);
     } catch (error) {
-      console.error("❌ Erreur chargement marché:", error);
+      logger.error("❌ Erreur chargement marché:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger les annonces du marché.",

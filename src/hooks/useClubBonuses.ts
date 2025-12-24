@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { getUserClubBonuses } from "@/lib/clubBonusSystem";
+import { logger } from "@/utils/logger";
 
 interface ClubBonuses {
   xpBoost: boolean;
@@ -30,7 +31,7 @@ export function useClubBonuses() {
         const userBonuses = await getUserClubBonuses(user.uid);
         setBonuses(userBonuses);
       } catch (error) {
-        console.error("Erreur chargement bonus:", error);
+        logger.error("Erreur chargement bonus:", error);
       } finally {
         setIsLoading(false);
       }

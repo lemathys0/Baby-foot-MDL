@@ -9,8 +9,9 @@ import { toast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from 'react-router-dom';
 import { AppLayout } from "@/components/layout/AppLayout";
-import { 
-    recordMatch, 
+import { logger } from '@/utils/logger';
+import {
+    recordMatch,
     getAvailablePlayers,
     EloUpdate
 } from "@/lib/firebaseMatch"; 
@@ -132,7 +133,7 @@ const RecordMatchForm = () => {
       setScore2(0);
 
     } catch (error: any) {
-      console.error("Erreur lors de l'enregistrement du match:", error);
+      logger.error("Erreur lors de l'enregistrement du match:", error);
       toast({
         title: "Erreur d'enregistrement",
         description: error.message || "Une erreur est survenue.",

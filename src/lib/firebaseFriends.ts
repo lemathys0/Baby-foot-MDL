@@ -3,6 +3,8 @@
 
 import { ref, set, get, update, remove, push, onValue, query, orderByChild, equalTo } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
+import { deoptimizeUserData } from "./dbOptimization";
 
 // ============================
 // 🤝 FRIENDS SYSTEM
@@ -74,7 +76,7 @@ export async function sendFriendRequest(
 
     await set(ref(database, `friendRequests/${requestId}`), requestData);
   } catch (error) {
-    console.error("Erreur lors de l'envoi de la demande:", error);
+    logger.error("Erreur lors de l'envoi de la demande:", error);
     throw error;
   }
 }
@@ -106,8 +108,12 @@ export async function acceptFriendRequest(requestId: string): Promise<void> {
       throw new Error("Utilisateur introuvable");
     }
 
-    const fromUser = fromSnapshot.val();
-    const toUser = toSnapshot.val();
+    const rawFromUser = fromSnapshot.val();
+    const rawToUser = toSnapshot.val();
+
+    // Déoptimiser les données pour accéder aux champs username, eloRating, etc.
+    const fromUser = deoptimizeUserData(rawFromUser);
+    const toUser = deoptimizeUserData(rawToUser);
 
     const updates: { [path: string]: unknown } = {};
 
@@ -133,7 +139,7 @@ export async function acceptFriendRequest(requestId: string): Promise<void> {
 
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur lors de l'acceptation:", error);
+    logger.error("Erreur lors de l'acceptation:", error);
     throw error;
   }
 }
@@ -147,7 +153,7 @@ export async function declineFriendRequest(requestId: string): Promise<void> {
       status: "declined",
     });
   } catch (error) {
-    console.error("Erreur lors du refus:", error);
+    logger.error("Erreur lors du refus:", error);
     throw error;
   }
 }
@@ -163,7 +169,7 @@ export async function removeFriend(userId: string, friendId: string): Promise<vo
     
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur lors de la suppression:", error);
+    logger.error("Erreur lors de la suppression:", error);
     throw error;
   }
 }
@@ -202,7 +208,7 @@ export async function getFriends(userId: string): Promise<Friend[]> {
 
     return friends;
   } catch (error) {
-    console.error("Erreur lors de la récupération des amis:", error);
+    logger.error("Erreur lors de la récupération des amis:", error);
     return [];
   }
 }
@@ -229,7 +235,7 @@ export async function getPendingFriendRequests(userId: string): Promise<FriendRe
 
     return pendingRequests.sort((a, b) => b.timestamp - a.timestamp);
   } catch (error) {
-    console.error("Erreur lors de la récupération des demandes:", error);
+    logger.error("Erreur lors de la récupération des demandes:", error);
     return [];
   }
 }
@@ -339,7 +345,7 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
     
     return snapshot.val() as UserSettings;
   } catch (error) {
-    console.error("Erreur lors de la récupération des paramètres:", error);
+    logger.error("Erreur lors de la récupération des paramètres:", error);
     return defaultSettings;
   }
 }
@@ -378,7 +384,7 @@ export async function updateUserSettings(
 
     await set(settingsRef, updatedSettings);
   } catch (error) {
-    console.error("Erreur lors de la mise à jour des paramètres:", error);
+    logger.error("Erreur lors de la mise à jour des paramètres:", error);
     throw error;
   }
 }
@@ -415,7 +421,7 @@ export async function setUserOnlineStatus(userId: string, online: boolean): Prom
       lastSeen: Date.now(),
     });
   } catch (error) {
-    console.error("Erreur lors de la mise à jour du statut:", error);
+    logger.error("Erreur lors de la mise à jour du statut:", error);
   }
 }
 
@@ -453,7 +459,7 @@ export async function searchUsers(searchTerm: string, currentUserId: string): Pr
 
     return results;
   } catch (error) {
-    console.error("Erreur lors de la recherche:", error);
+    logger.error("Erreur lors de la recherche:", error);
     return [];
   }
 }

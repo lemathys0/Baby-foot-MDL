@@ -2,6 +2,8 @@
 // ============================
 // Configuration et logique du système de cartes - VERSION CORRIGÉE
 
+import { logger } from "@/utils/logger";
+
 /**
  * Interface pour les données complètes d'une carte (utilisée pour le tirage).
  */
@@ -116,7 +118,7 @@ function pickWeightedCard(
 ): CardData | null {
   const cardsInSeason = codeToCardMap[season];
   if (!cardsInSeason) {
-    console.warn(`⚠️ Saison "${season}" introuvable dans codeToCardMap`);
+    logger.warn(`⚠️ Saison "${season}" introuvable dans codeToCardMap`);
     return null;
   }
 
@@ -124,7 +126,7 @@ function pickWeightedCard(
     .filter(([code]) => !excludeCodes.has(code)); 
   
   if (pool.length === 0) {
-    console.warn(`⚠️ Plus de cartes disponibles dans la saison "${season}"`);
+    logger.warn(`⚠️ Plus de cartes disponibles dans la saison "${season}"`);
     return null;
   }
 
@@ -184,13 +186,13 @@ export function drawCards(
       selected.push(pickedCard);
       pickedCodes.add(pickedCard.code);
     } else if (!pickedCard) {
-      console.error(`❌ Impossible de tirer une carte après ${attempts} tentatives`);
+      logger.error(`❌ Impossible de tirer une carte après ${attempts} tentatives`);
       break;
     }
   }
   
   if (selected.length < count) {
-    console.warn(`⚠️ Seulement ${selected.length}/${count} cartes tirées`);
+    logger.warn(`⚠️ Seulement ${selected.length}/${count} cartes tirées`);
   }
   
   return selected;
@@ -226,7 +228,7 @@ export function getRarityCategory(rarity: string): Rarity {
   
   if (normalized === "createur") return "creator";
   
-  console.warn(`⚠️ Rareté inconnue: "${rarity}" (normalisée: "${normalized}")`);
+  logger.warn(`⚠️ Rareté inconnue: "${rarity}" (normalisée: "${normalized}")`);
   return "unknown"; 
 }
 

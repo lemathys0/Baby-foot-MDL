@@ -1,8 +1,10 @@
 // src/lib/taxSystem.ts
 import { ref, get, update } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 // ✅ FIX: Import de la fonction depuis utils.ts pour éviter la duplication
 import { calculateTaxRate, TAX_BRACKETS } from "./utils";
+import { addFortuneHistoryEntry } from "./firebaseExtended";
 
 interface UserTaxData {
   bettingGains: number;
@@ -121,7 +123,7 @@ export async function getUserTaxInfo(userId: string): Promise<UserTaxData> {
       daysUntilNextTax: getDaysUntilLastWeekend(),
     };
   } catch (error) {
-    console.error("Erreur récupération infos fiscales:", error);
+    logger.error("Erreur récupération infos fiscales:", error);
     return {
       bettingGains: 0,
       taxesDue: 0,
@@ -179,20 +181,29 @@ export async function payTaxesManually(userId: string): Promise<{ success: boole
     }
     
     // Déduire les taxes et marquer comme payé
+    const newFortune = fortune - taxesDue;
     const updates: { [key: string]: any } = {};
-    updates[`users/${userId}/fortune`] = fortune - taxesDue;
+    updates[`users/${userId}/fortune`] = newFortune;
     updates[`users/${userId}/taxesPaidThisMonth`] = true;
     updates[`users/${userId}/lastTaxPaymentDate`] = Date.now();
     updates[`users/${userId}/totalTaxesPaid`] = (userData.totalTaxesPaid || 0) + taxesDue;
-    
+
     await update(ref(database), updates);
-    
+
+    // Enregistrer dans l'historique
+    await addFortuneHistoryEntry(
+      userId,
+      newFortune,
+      -taxesDue,
+      `Paiement de taxes (${taxRate}% sur ${bettingGains}€ de gains)`
+    );
+
     return {
       success: true,
       message: `${taxesDue}€ de taxes payées avec succès`,
     };
   } catch (error: any) {
-    console.error("Erreur paiement taxes:", error);
+    logger.error("Erreur paiement taxes:", error);
     return {
       success: false,
       message: error.message || "Erreur lors du paiement des taxes",
@@ -219,8 +230,8 @@ export async function resetMonthlyTaxStatus(): Promise<void> {
     });
     
     await update(ref(database), updates);
-    console.log("Statut de paiement réinitialisé pour tous les utilisateurs");
+    logger.log("Statut de paiement réinitialisé pour tous les utilisateurs");
   } catch (error) {
-    console.error("Erreur réinitialisation statut:", error);
+    logger.error("Erreur réinitialisation statut:", error);
   }
 }

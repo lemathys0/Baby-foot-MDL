@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Trophy, Users, Layers, TrendingUp, Zap } from "lucide-react";
+import { Trophy, Users, Layers, TrendingUp, Zap, Loader2  } from "lucide-react";
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -8,9 +8,8 @@ import { Button } from "@/components/ui/button";
 import { getAppStats, onAppStatsUpdate, getRecentMatches, onRecentMatchesUpdate, Match, getQueuedPlayers, onQueueUpdate, QueuedPlayer } from "@/lib/firebaseSync";
 import { getCardStats } from "@/lib/firebaseCards";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTutorial } from "@/hooks/useTutorial";
-import TutorialOverlay from "@/components/TutorialOverlay";
-import SafeDailyBonusCard from "@/components/SafeDailyBonusCard";
+import { logger } from '@/utils/logger';
+import { QuickQuestCard } from "@/components/quests/QuickQuestCard";
 
 const Index = () => {
   const { user } = useAuth();
@@ -24,15 +23,7 @@ const Index = () => {
   const [cardStats, setCardStats] = useState({ totalCards: 0, uniqueCards: 48 });
   const [loading, setLoading] = useState(true);
 
-  // ✅ Hook tutoriel pour afficher automatiquement
-  const { showTutorial, completeTutorial, isLoading: tutorialLoading } = useTutorial(user?.uid);
-
   useEffect(() => {
-    console.log("🏠 [Index] État tutoriel:", { showTutorial, user: user?.uid, tutorialLoading });
-  }, [showTutorial, user, tutorialLoading]);
-
-  useEffect(() => {
-    // Charger les stats initiales
     const loadInitialData = async () => {
       try {
         const [appStats, matches, queue] = await Promise.all([
@@ -45,13 +36,12 @@ const Index = () => {
         setRecentMatches(matches);
         setQueuedPlayers(queue);
 
-        // Charger les stats de cartes si l'utilisateur est connecté
         if (user) {
           const cards = await getCardStats(user.uid);
           setCardStats(cards);
         }
       } catch (error) {
-        console.error("Erreur chargement données:", error);
+        logger.error("Erreur chargement données:", error);
       } finally {
         setLoading(false);
       }
@@ -59,7 +49,6 @@ const Index = () => {
 
     loadInitialData();
 
-    // Écouter les mises à jour en temps réel
     const unsubscribeStats = onAppStatsUpdate(setStats);
     const unsubscribeMatches = onRecentMatchesUpdate((matches) => {
       setRecentMatches(matches.slice(0, 3));
@@ -88,10 +77,11 @@ const Index = () => {
 
   const getActivityFromMatches = () => {
     const activities = [];
-
-    // Ajouter les matchs récents
     recentMatches.forEach((match) => {
-      const winner = match.score1 > match.score2 
+      // Skip les matchs optimisés sans noms (anciens matchs ont team1Names/team2Names)
+      if (!match.team1Names || !match.team2Names) return;
+
+      const winner = match.score1 > match.score2
         ? match.team1Names.join(" & ")
         : match.team2Names.join(" & ");
       activities.push({
@@ -101,7 +91,6 @@ const Index = () => {
       });
     });
 
-    // Ajouter une activité sur les cartes si disponible
     if (user && cardStats.uniqueCards > 0) {
       activities.push({
         text: `${cardStats.uniqueCards} cartes uniques collectées`,
@@ -109,11 +98,11 @@ const Index = () => {
         type: "card" as const,
       });
     }
-
     return activities.slice(0, 3);
   };
 
-  if (loading || tutorialLoading) {
+  // Suppression du bloc tutorialLoading qui causait l'erreur
+  if (loading) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center min-h-[60vh]">
@@ -130,14 +119,6 @@ const Index = () => {
 
   return (
     <AppLayout>
-      {/* ✅ TUTORIEL AUTOMATIQUE */}
-      {showTutorial && user && (
-        <>
-          {console.log("🎓 [Index] Affichage du tutoriel")}
-          <TutorialOverlay onComplete={completeTutorial} />
-        </>
-      )}
-
       {/* Hero Section */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -159,9 +140,6 @@ const Index = () => {
         </p>
       </motion.div>
 
-      {/* ✅ BONUS QUOTIDIEN */}
-      {user && <SafeDailyBonusCard />}
-
       {/* Quick Stats */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
@@ -172,27 +150,33 @@ const Index = () => {
         <Card className="text-center">
           <CardContent className="p-4">
             <Zap className="mx-auto mb-2 h-6 w-6 text-primary" />
-            <p className="text-2xl font-bold text-foreground">
-              {stats.averageElo || 0}
-            </p>
+            {loading ? (
+              <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+            ) : (
+              <p className="text-2xl font-bold text-foreground">{stats.averageElo}</p>
+            )}
             <p className="text-xs text-muted-foreground">ELO Moyen</p>
           </CardContent>
         </Card>
         <Card className="text-center">
           <CardContent className="p-4">
             <Users className="mx-auto mb-2 h-6 w-6 text-secondary" />
-            <p className="text-2xl font-bold text-foreground">
-              {stats.totalPlayers || 0}
-            </p>
+            {loading ? (
+              <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+            ) : (
+              <p className="text-2xl font-bold text-foreground">{stats.totalPlayers}</p>
+            )}
             <p className="text-xs text-muted-foreground">Joueurs</p>
           </CardContent>
         </Card>
         <Card className="text-center">
           <CardContent className="p-4">
             <Trophy className="mx-auto mb-2 h-6 w-6 text-rarity-gold" />
-            <p className="text-2xl font-bold text-foreground">
-              {stats.totalMatches || 0}
-            </p>
+            {loading ? (
+              <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />
+            ) : (
+              <p className="text-2xl font-bold text-foreground">{stats.totalMatches}</p>
+            )}
             <p className="text-xs text-muted-foreground">Matchs</p>
           </CardContent>
         </Card>
@@ -227,10 +211,13 @@ const Index = () => {
           </Link>
         </motion.div>
 
+        {/* Carte des quêtes */}
+        <QuickQuestCard />
+
         <motion.div
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          transition={{ delay: 0.3 }}
+          transition={{ delay: 0.4 }}
         >
           <Link to="/leaderboard">
             <Card className="group cursor-pointer overflow-hidden transition-all hover:border-rarity-gold/50">
@@ -340,7 +327,6 @@ const Index = () => {
                 <span className="text-lg">
                   {activity.type === "match" && "⚽"}
                   {activity.type === "card" && "🃏"}
-                  {activity.type === "tournament" && "🏆"}
                 </span>
                 <div className="flex-1">
                   <p className="text-sm text-foreground">{activity.text}</p>

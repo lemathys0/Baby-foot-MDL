@@ -8,6 +8,7 @@ import { ref, get } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { type Club } from "@/lib/firebaseExtended";
 import { useNavigate } from "react-router-dom";
+import { logger } from '@/utils/logger';
 
 interface ClubCardProps {
   userId: string;
@@ -46,7 +47,7 @@ export function ClubCard({ userId }: ClubCardProps) {
         }
       }
     } catch (error) {
-      console.error("Erreur chargement club:", error);
+      logger.error("Erreur chargement club:", error);
     } finally {
       setIsLoading(false);
     }

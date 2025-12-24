@@ -2,6 +2,14 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
+import { logger } from '@/utils/logger';
+import { initSentry } from '@/lib/sentry';
+
+// Initialize Sentry for error monitoring (v2.0.0)
+initSentry();
+
+// Initialize logger (prevents tree-shaking)
+logger.log("🚀 Application starting...");
 
 const rootElement = document.getElementById("root");
 
@@ -30,22 +38,22 @@ if ("serviceWorker" in navigator) {
         updateViaCache: "none"
       })
       .then((registration) => {
-        console.log("✅ [FCM] Service Worker enregistré !", registration.scope);
+        logger.log("✅ [FCM] Service Worker enregistré !", registration.scope);
         
         // Vérifier les mises à jour toutes les heures
         setInterval(() => {
           registration.update();
-          console.log("🔄 [FCM] Vérification de mise à jour SW...");
+          logger.log("🔄 [FCM] Vérification de mise à jour SW...");
         }, 60 * 60 * 1000);
         
         // Gérer les mises à jour du SW
         registration.addEventListener("updatefound", () => {
           const newWorker = registration.installing;
-          console.log("🆕 [FCM] Nouvelle version du SW détectée !");
+          logger.log("🆕 [FCM] Nouvelle version du SW détectée !");
           
           newWorker?.addEventListener("statechange", () => {
             if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
-              console.log("📢 [FCM] Nouvelle version disponible !");
+              logger.log("📢 [FCM] Nouvelle version disponible !");
               
               if (confirm("Une nouvelle version est disponible ! Voulez-vous recharger ?")) {
                 newWorker.postMessage({ type: "SKIP_WAITING" });
@@ -60,22 +68,22 @@ if ("serviceWorker" in navigator) {
         navigator.serviceWorker.addEventListener("controllerchange", () => {
           if (!refreshing) {
             refreshing = true;
-            console.log("🔄 [FCM] Nouveau SW actif, rechargement...");
+            logger.log("🔄 [FCM] Nouveau SW actif, rechargement...");
             window.location.reload();
           }
         });
       })
       .catch((err) => {
-        console.error("❌ [FCM] Erreur d'enregistrement du Service Worker:", err);
+        logger.error("❌ [FCM] Erreur d'enregistrement du Service Worker:", err);
       });
     
     // Événements réseau
     window.addEventListener("online", () => {
-      console.log("🌐 [App] Connexion rétablie !");
+      logger.log("🌐 [App] Connexion rétablie !");
     });
     
     window.addEventListener("offline", () => {
-      console.log("📡 [App] Mode hors ligne activé");
+      logger.log("📡 [App] Mode hors ligne activé");
     });
   });
 }
@@ -94,7 +102,7 @@ if (import.meta.env.DEV) {
     clearCache: async () => {
       const cacheNames = await caches.keys();
       await Promise.all(cacheNames.map(name => caches.delete(name)));
-      console.log("🗑️ Tous les caches supprimés !");
+      logger.log("🗑️ Tous les caches supprimés !");
       window.location.reload();
     },
     
@@ -105,9 +113,9 @@ if (import.meta.env.DEV) {
         const cache = await caches.open(name);
         const keys = await cache.keys();
         total += keys.length;
-        console.log(`📦 ${name}: ${keys.length} entrées`);
+        logger.log(`📦 ${name}: ${keys.length} entrées`);
       }
-      console.log(`📊 Total: ${total} entrées en cache`);
+      logger.log(`📊 Total: ${total} entrées en cache`);
       return total;
     },
     
@@ -115,14 +123,14 @@ if (import.meta.env.DEV) {
       const registration = await navigator.serviceWorker.getRegistration();
       if (registration) {
         await registration.unregister();
-        console.log("❌ Service Worker désinscrit !");
+        logger.log("❌ Service Worker désinscrit !");
         window.location.reload();
       }
     }
   };
   
-  console.log("🛠️ Mode DEV : Utilisez window.swDebug pour déboguer");
-  console.log("  - swDebug.clearCache()");
-  console.log("  - swDebug.getCacheSize()");
-  console.log("  - swDebug.unregister()");
+  logger.log("🛠️ Mode DEV : Utilisez window.swDebug pour déboguer");
+  logger.log("  - swDebug.clearCache()");
+  logger.log("  - swDebug.getCacheSize()");
+  logger.log("  - swDebug.unregister()");
 }

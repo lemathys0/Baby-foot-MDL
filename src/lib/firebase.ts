@@ -1,28 +1,51 @@
+// ✅ src/lib/firebase.ts - Configuration Firebase corrigée
+
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getMessaging } from "firebase/messaging";
+import { getAnalytics } from "firebase/analytics";
+import { logger } from "@/utils/logger";
 
-// Configuration Firebase - Remplacez par vos propres valeurs
+// Configuration Firebase (depuis variables d'environnement)
 const firebaseConfig = {
-  apiKey: "AIzaSyCbAU10zAKrvv9WJtapj1uBTQhKAlZrhXg",
-  authDomain: "baby-footv2.firebaseapp.com",
-  databaseURL: "https://baby-footv2-default-rtdb.firebaseio.com",
-  projectId: "baby-footv2",
-  storageBucket: "baby-footv2.firebasestorage.app",
-  messagingSenderId: "630738367010",
-  appId: "1:630738367010:web:8070effcead46645d7507b",
-  measurementId: "G-PCFZ8HZ8C4"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication and get a reference to the service
-export const auth = getAuth(app);
-export const VAPID_KEY = "BAJ02eLWbYkPyz_w3S304RHeltRnL-5l7T9to_ruWiLDjJor9rmc7YEZ_xvGj27TCkIwtxDecQ8JopCIVAmrGvw";
-// Initialize Realtime Database and get a reference to the service
-export const database = getDatabase(app);
-export const messaging = getMessaging(app);
-export default app;
+// ✅ Vérifier si on est dans le navigateur avant d'initialiser Analytics
+let analytics = null;
+if (typeof window !== 'undefined') {
+  analytics = getAnalytics(app);
+}
 
+// Initialize Firebase Authentication
+export const auth = getAuth(app);
+
+// VAPID Key pour les notifications push (depuis variables d'environnement)
+export const VAPID_KEY = import.meta.env.VITE_FIREBASE_VAPID_KEY;
+
+// Initialize Realtime Database
+export const database = getDatabase(app);
+
+// Initialize Cloud Messaging (seulement dans le navigateur)
+let messaging = null;
+if (typeof window !== 'undefined') {
+  try {
+    messaging = getMessaging(app);
+  } catch (error) {
+    logger.warn("⚠️ Messaging non disponible (probablement en développement local)", error);
+  }
+}
+
+export { messaging, analytics };
+export default app;

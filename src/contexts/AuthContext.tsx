@@ -10,6 +10,9 @@ import {
 import { ref, set, get } from "firebase/database";
 import { auth, database } from "@/lib/firebase";
 import { toast } from "@/hooks/use-toast";
+import { logger } from '@/utils/logger';
+import { setSentryUser, clearSentryUser } from '@/lib/sentry';
+import { optimizeUserData, toSeconds, boolToNum, ROLE_ENUM } from "@/lib/dbOptimization";
 
 interface UserProfile {
   username: string;
@@ -76,13 +79,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
           
           setUser(null);
           setUserProfile(null);
+          clearSentryUser();
           return;
         }
-        
+
         setUserProfile(profile);
+        // Set user context in Sentry
+        if (uid) {
+          setSentryUser(uid, profile.username, auth.currentUser?.email || undefined);
+        }
       }
     } catch (error) {
-      console.error("Error fetching user profile:", error);
+      logger.error("Error fetching user profile:", error);
     }
   };
 
@@ -90,15 +98,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
-      
+
       if (currentUser) {
         setTimeout(() => {
           fetchUserProfile(currentUser.uid);
         }, 0);
       } else {
         setUserProfile(null);
+        clearSentryUser();
       }
-      
+
       setLoading(false);
     });
 
@@ -163,7 +172,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     username: string
   ): Promise<{ error: string | null; userId?: string }> => {
     try {
-      console.log("📝 Création du compte pour:", email);
+      logger.log("📝 Création du compte pour:", email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const newUser = userCredential.user;
 
@@ -185,21 +194,36 @@ export function AuthProvider({ children }: AuthProviderProps) {
       };
 
       const createdAtTimestamp = Date.now();
-      
-      await set(ref(database, `users/${newUser.uid}`), {
-        ...newProfile,
+      const BONUS_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 heures
+
+      // ✅ OPTIMISÉ: Structure compactée avec clés abrégées
+      const userDataToStore = optimizeUserData({
+        username,
+        eloRating: 1000, // Sera converti en e1, e2, eg
+        wins: 0,         // Sera converti en w1, w2
+        losses: 0,       // Sera converti en l1, l2
+        fortune: 100,
+        totalEarned: 0,
+        role: "player",
+        banned: false,
+        hasSeenTutorial: false,
         createdAt: createdAtTimestamp,
-        lastBonusClaim: createdAtTimestamp, // ✅ Initialiser le bonus quotidien
+        lastBonusClaim: createdAtTimestamp - BONUS_INTERVAL_MS,
         totalDailyBonus: 0,
         dailyBonusStreak: 0,
+        winStreak: 0,
+        thursdayWins: 0,
+        betWins: 0,
       });
+
+      await set(ref(database, `users/${newUser.uid}`), userDataToStore);
       setUserProfile(newProfile);
 
-      console.log("✅ Profil créé avec succès pour:", newUser.uid);
+      logger.log("✅ Profil créé avec succès pour:", newUser.uid);
 
       return { error: null, userId: newUser.uid };
     } catch (error: any) {
-      console.error("❌ Erreur inscription:", error);
+      logger.error("❌ Erreur inscription:", error);
       
       let errorMessage = "Une erreur est survenue lors de l'inscription.";
       
@@ -227,8 +251,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     try {
       await signOut(auth);
       setUserProfile(null);
+      clearSentryUser();
     } catch (error) {
-      console.error("Error signing out:", error);
+      logger.error("Error signing out:", error);
     }
   };
 

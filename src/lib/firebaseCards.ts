@@ -5,6 +5,7 @@
 import { ref, get, update } from "firebase/database";
 import { database } from "./firebase";
 import { CardData } from "./cardSystem";
+import { logger } from "@/utils/logger";
 
 // ✅ Re-export des types et fonctions utilitaires
 export { 
@@ -33,7 +34,7 @@ export async function getUserCardQuantities(uid: string): Promise<UserCardQuanti
     const snapshot = await get(userRef);
     return snapshot.exists() ? snapshot.val() : {};
   } catch (error) {
-    console.error("❌ Erreur chargement quantités:", error);
+    logger.error("❌ Erreur chargement quantités:", error);
     return {};
   }
 }
@@ -124,7 +125,7 @@ export async function openBoosterPack(
     
     return drawnCards;
   } catch (error) {
-    console.error("❌ Erreur openBoosterPack:", error);
+    logger.error("❌ Erreur openBoosterPack:", error);
     throw error;
   }
 }

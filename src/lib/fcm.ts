@@ -1,6 +1,7 @@
 import { getToken, onMessage } from "firebase/messaging";
 import { ref, update } from "firebase/database";
 import { database, messaging, VAPID_KEY } from "./firebase";
+import { logger } from "@/utils/logger";
 
 /**
  * Vérifier si FCM est supporté
@@ -14,7 +15,7 @@ function isFCMSupported(): boolean {
      window.location.hostname === '127.0.0.1')
   );
   
-  console.log("🔍 [FCM] Vérification support:", {
+  logger.log("🔍 [FCM] Vérification support:", {
     hasServiceWorker: 'serviceWorker' in navigator,
     hasNotification: 'Notification' in window,
     protocol: window.location.protocol,
@@ -29,35 +30,35 @@ function isFCMSupported(): boolean {
  * 📱 Demander la permission et obtenir le token FCM
  */
 export async function requestNotificationPermission(userId: string): Promise<string | null> {
-  console.log("🔍 [FCM] Début requestNotificationPermission pour:", userId);
+  logger.log("🔍 [FCM] Début requestNotificationPermission pour:", userId);
   
   // ⚠️ Vérifier si FCM est supporté
   if (!isFCMSupported()) {
-    console.warn("⚠️ [FCM] FCM non supporté sur cet appareil/navigateur");
+    logger.warn("⚠️ [FCM] FCM non supporté sur cet appareil/navigateur");
     return null;
   }
 
-  console.log("✅ [FCM] FCM supporté, demande permission...");
+  logger.log("✅ [FCM] FCM supporté, demande permission...");
   
   try {
     // Demander la permission
     const permission = await Notification.requestPermission();
-    console.log("📱 [FCM] Résultat permission:", permission);
+    logger.log("📱 [FCM] Résultat permission:", permission);
     
     if (permission !== "granted") {
-      console.log("❌ [FCM] Permission refusée par l'utilisateur");
+      logger.log("❌ [FCM] Permission refusée par l'utilisateur");
       return null;
     }
 
-    console.log("🔑 [FCM] Tentative d'obtention du token...");
+    logger.log("🔑 [FCM] Tentative d'obtention du token...");
     
     // Obtenir le token FCM
     const token = await getToken(messaging, { vapidKey: VAPID_KEY });
-    console.log("🔑 [FCM] Token obtenu:", token ? "OUI ✅" : "NON ❌");
+    logger.log("🔑 [FCM] Token obtenu:", token ? "OUI ✅" : "NON ❌");
     
     if (token) {
-      console.log("✅ [FCM] Token FCM complet:", token);
-      console.log("💾 [FCM] Sauvegarde du token dans Firebase Database...");
+      logger.log("✅ [FCM] Token FCM complet:", token);
+      logger.log("💾 [FCM] Sauvegarde du token dans Firebase Database...");
       
       // Sauvegarder le token dans Firebase
       await update(ref(database, `users/${userId}`), {
@@ -65,21 +66,21 @@ export async function requestNotificationPermission(userId: string): Promise<str
         fcmTokenUpdatedAt: Date.now()
       });
       
-      console.log("✅ [FCM] Token sauvegardé avec succès dans Firebase !");
-      console.log("📍 [FCM] Chemin: users/" + userId + "/fcmToken");
+      logger.log("✅ [FCM] Token sauvegardé avec succès dans Firebase !");
+      logger.log("📍 [FCM] Chemin: users/" + userId + "/fcmToken");
       
       return token;
     } else {
-      console.log("❌ [FCM] Impossible d'obtenir le token (messaging non initialisé ?)");
+      logger.log("❌ [FCM] Impossible d'obtenir le token (messaging non initialisé ?)");
       return null;
     }
   } catch (error) {
-    console.error("❌ [FCM] Erreur lors de l'obtention du token:", error);
+    logger.error("❌ [FCM] Erreur lors de l'obtention du token:", error);
     
     // Afficher plus de détails sur l'erreur
     if (error instanceof Error) {
-      console.error("❌ [FCM] Message d'erreur:", error.message);
-      console.error("❌ [FCM] Stack:", error.stack);
+      logger.error("❌ [FCM] Message d'erreur:", error.message);
+      logger.error("❌ [FCM] Stack:", error.stack);
     }
     
     return null;
@@ -91,26 +92,26 @@ export async function requestNotificationPermission(userId: string): Promise<str
  */
 export function listenToForegroundMessages(callback: (payload: any) => void) {
   if (!isFCMSupported()) {
-    console.warn("⚠️ [FCM] Listeners désactivés (FCM non supporté)");
+    logger.warn("⚠️ [FCM] Listeners désactivés (FCM non supporté)");
     return;
   }
 
-  console.log("👂 [FCM] Initialisation des listeners de messages...");
+  logger.log("👂 [FCM] Initialisation des listeners de messages...");
 
   try {
     onMessage(messaging, (payload) => {
-      console.log("📩 [FCM] Message reçu en premier plan:", payload);
+      logger.log("📩 [FCM] Message reçu en premier plan:", payload);
       callback(payload);
       
       // Vibration
       if ("vibrate" in navigator) {
         navigator.vibrate([100, 50, 100]);
-        console.log("📳 [FCM] Vibration déclenchée");
+        logger.log("📳 [FCM] Vibration déclenchée");
       }
     });
     
-    console.log("✅ [FCM] Listeners configurés avec succès");
+    logger.log("✅ [FCM] Listeners configurés avec succès");
   } catch (error) {
-    console.error("❌ [FCM] Erreur lors de la configuration des listeners:", error);
+    logger.error("❌ [FCM] Erreur lors de la configuration des listeners:", error);
   }
 }

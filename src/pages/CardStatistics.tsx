@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
 import { getMarketStats, type MarketStats } from "@/lib/firebaseMarket";
 import { motion } from "framer-motion";
+import { logger } from '@/utils/logger';
 import {
   TrendingUp,
   TrendingDown,
@@ -33,7 +34,7 @@ const CardStatistics = () => {
 
   const handleSearch = async () => {
     const input = searchCode.trim().toLowerCase();
-    console.log("🔍 Recherche pour:", input);
+    logger.log("🔍 Recherche pour:", input);
     
     if (!input) {
       toast({ title: "Erreur", description: "Veuillez entrer un nom ou un code." });
@@ -46,13 +47,13 @@ const CardStatistics = () => {
 
       // 1. On cherche si c'est un code exact
       const directCard = getCardByCode(input.toUpperCase());
-      console.log("📇 Carte directe trouvée:", directCard);
+      logger.log("📇 Carte directe trouvée:", directCard);
       
       if (directCard.found) {
         targetCode = directCard.code;
       } else {
         // 2. Sinon, on cherche par nom dans toutes les saisons
-        console.log("🔎 Recherche par nom dans codeToCardMap...");
+        logger.log("🔎 Recherche par nom dans codeToCardMap...");
         for (const season of Object.keys(codeToCardMap)) {
           const cards = codeToCardMap[season];
           const foundCode = Object.keys(cards).find(code => {
@@ -62,13 +63,13 @@ const CardStatistics = () => {
           
           if (foundCode) {
             targetCode = foundCode;
-            console.log("✅ Code trouvé:", foundCode, "dans la saison:", season);
+            logger.log("✅ Code trouvé:", foundCode, "dans la saison:", season);
             break;
           }
         }
       }
 
-      console.log("🎯 Code cible final:", targetCode);
+      logger.log("🎯 Code cible final:", targetCode);
 
       if (!targetCode) {
         toast({ title: "Non trouvé", description: "Aucune carte ne correspond à ce nom ou code." });
@@ -76,10 +77,10 @@ const CardStatistics = () => {
       }
 
       // 3. Récupération des stats via le code trouvé
-      console.log("📊 Appel getMarketStats pour:", targetCode);
+      logger.log("📊 Appel getMarketStats pour:", targetCode);
       const stats = await getMarketStats(targetCode);
-      console.log("📈 Stats récupérées:", stats);
-      console.log("💰 Prix history:", stats?.priceHistory);
+      logger.log("📈 Stats récupérées:", stats);
+      logger.log("💰 Prix history:", stats?.priceHistory);
       
       if (stats) {
         setSelectedStats(stats);
@@ -87,11 +88,11 @@ const CardStatistics = () => {
           setRecentSearches(prev => [stats, ...prev].slice(0, 5));
         }
       } else {
-        console.log("❌ Aucune stats retournée");
+        logger.log("❌ Aucune stats retournée");
         toast({ title: "Aucune donnée", description: "Cette carte n'a pas encore de transactions enregistrées." });
       }
     } catch (error) {
-      console.error("❌ Erreur lors de la recherche:", error);
+      logger.error("❌ Erreur lors de la recherche:", error);
       toast({ title: "Erreur", description: "Erreur lors de la recherche." });
     } finally {
       setIsLoading(false);
@@ -235,7 +236,7 @@ const CardStatistics = () => {
       </div>
       
       {/* Statistiques */}
-      <div className="grid grid-cols-3 gap-2 text-xs">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
         <div className="bg-green-500/10 rounded-lg p-2 text-center border border-green-500/20">
           <p className="text-muted-foreground mb-1">Min</p>
           <p className="font-bold text-green-600">{minPrice}€</p>

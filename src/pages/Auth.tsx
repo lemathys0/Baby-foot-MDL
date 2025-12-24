@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { z } from "zod";
 import { getAuth, sendPasswordResetEmail } from "firebase/auth";
-import TutorialOverlay from "@/components/TutorialOverlay";
 import { ref, update } from "firebase/database";
 import { database } from "@/lib/firebase";
+import { logger } from "@/utils/logger";
 
 // Validation schemas
 const loginSchema = z.object({
@@ -53,21 +53,21 @@ const Auth = () => {
 
   // Debug: surveiller les changements d'état
   useEffect(() => {
-    console.log("🎯 État mis à jour:");
-    console.log("  - user:", user?.uid);
-    console.log("  - showTutorialAfterSignup:", showTutorialAfterSignup);
+    logger.log("🎯 État mis à jour:");
+    logger.log("  - user:", user?.uid);
+    logger.log("  - showTutorialAfterSignup:", showTutorialAfterSignup);
   }, [user, showTutorialAfterSignup]);
 
   // Redirect if already logged in (sauf si tutoriel en cours)
   useEffect(() => {
-    console.log("🔄 useEffect redirection - user:", user?.uid, "showTutorial:", showTutorialAfterSignup);
-    
+    logger.log("🔄 useEffect redirection - user:", user?.uid, "showTutorial:", showTutorialAfterSignup);
+
     if (user && !showTutorialAfterSignup) {
-      console.log("➡️ Redirection vers accueil");
+      logger.log("➡️ Redirection vers accueil");
       const from = location.state?.from?.pathname || "/";
       navigate(from, { replace: true });
     } else if (user && showTutorialAfterSignup) {
-      console.log("⏸️ Redirection bloquée (tutoriel en cours)");
+      logger.log("⏸️ Redirection bloquée (tutoriel en cours)");
     }
   }, [user, navigate, location, showTutorialAfterSignup]);
 
@@ -88,7 +88,7 @@ const Auth = () => {
     setError(null);
     setValidationErrors({});
 
-    console.log("🔵 handleSubmit - Début, isLogin:", isLogin);
+    logger.log("🔵 handleSubmit - Début, isLogin:", isLogin);
 
     // Validate form
     try {
@@ -106,7 +106,7 @@ const Auth = () => {
           }
         });
         setValidationErrors(errors);
-        console.log("❌ Erreurs de validation:", errors);
+        logger.log("❌ Erreurs de validation:", errors);
         return;
       }
     }
@@ -115,36 +115,36 @@ const Auth = () => {
 
     try {
       if (isLogin) {
-        console.log("🔑 Tentative de connexion...");
+        logger.log("🔑 Tentative de connexion...");
         const result = await login(email, password);
         if (result.error) {
-          console.log("❌ Erreur de connexion:", result.error);
+          logger.log("❌ Erreur de connexion:", result.error);
           setError(result.error);
         } else {
-          console.log("✅ Connexion réussie");
+          logger.log("✅ Connexion réussie");
         }
       } else {
-        console.log("📝 Tentative d'inscription...");
+        logger.log("📝 Tentative d'inscription...");
         const result = await signup(email, password, username);
-        console.log("📊 Résultat inscription:", result);
-        
+        logger.log("📊 Résultat inscription:", result);
+
         if (result.error) {
-          console.log("❌ Erreur d'inscription:", result.error);
+          logger.log("❌ Erreur d'inscription:", result.error);
           setError(result.error);
         } else if (result.userId) {
-          console.log("✅ Inscription réussie! UserId:", result.userId);
-          console.log("🎓 Activation du tutoriel...");
+          logger.log("✅ Inscription réussie! UserId:", result.userId);
+          logger.log("🎓 Activation du tutoriel...");
           setShowTutorialAfterSignup(true);
-          console.log("🎓 État showTutorialAfterSignup:", true);
+          logger.log("🎓 État showTutorialAfterSignup:", true);
         } else {
-          console.log("⚠️ Inscription réussie mais pas de userId retourné");
+          logger.log("⚠️ Inscription réussie mais pas de userId retourné");
         }
       }
     } catch (error) {
-      console.error("💥 Erreur inattendue:", error);
+      logger.error("💥 Erreur inattendue:", error);
     } finally {
       setIsLoading(false);
-      console.log("🔵 handleSubmit - Fin");
+      logger.log("🔵 handleSubmit - Fin");
     }
   };
 
@@ -184,22 +184,22 @@ const Auth = () => {
   // ✅ Fonction pour compléter le tutoriel
   const handleCompleteTutorial = async () => {
     if (!user?.uid) {
-      console.error("❌ Pas d'utilisateur connecté");
+      logger.error("❌ Pas d'utilisateur connecté");
       return;
     }
 
     try {
-      console.log("✅ Marquage du tutoriel comme complété pour:", user.uid);
+      logger.log("✅ Marquage du tutoriel comme complété pour:", user.uid);
       const userRef = ref(database, `users/${user.uid}`);
       await update(userRef, {
         hasSeenTutorial: true,
         tutorialCompletedAt: Date.now(),
       });
-      
+
       setShowTutorialAfterSignup(false);
       navigate("/");
     } catch (error) {
-      console.error("❌ Erreur completion tutoriel:", error);
+      logger.error("❌ Erreur completion tutoriel:", error);
       // Même en cas d'erreur, on navigue vers l'accueil
       setShowTutorialAfterSignup(false);
       navigate("/");
@@ -210,27 +210,27 @@ const Auth = () => {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       {/* ✅ TUTORIEL APRÈS INSCRIPTION */}
       {(() => {
-        console.log("🎨 Rendu - showTutorialAfterSignup:", showTutorialAfterSignup);
-        console.log("🎨 Rendu - user:", user?.uid);
+        logger.log("🎨 Rendu - showTutorialAfterSignup:", showTutorialAfterSignup);
+        logger.log("🎨 Rendu - user:", user?.uid);
         return null;
       })()}
-      
+
       {showTutorialAfterSignup && user && (
         <>
-          {console.log("🎓 AFFICHAGE DU TUTORIEL CONFIRMÉ")}
+          {logger.log("🎓 AFFICHAGE DU TUTORIEL CONFIRMÉ")}
           <TutorialOverlay onComplete={handleCompleteTutorial} />
         </>
       )}
 
       {showTutorialAfterSignup && !user && (
         <>
-          {console.log("⚠️ showTutorialAfterSignup=true MAIS user=null")}
+          {logger.log("⚠️ showTutorialAfterSignup=true MAIS user=null")}
         </>
       )}
 
       {!showTutorialAfterSignup && (
         <>
-          {console.log("ℹ️ Tutoriel non affiché (showTutorialAfterSignup=false)")}
+          {logger.log("ℹ️ Tutoriel non affiché (showTutorialAfterSignup=false)")}
         </>
       )}
 

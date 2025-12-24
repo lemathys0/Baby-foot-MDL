@@ -4,6 +4,7 @@
 
 import { ref, get, query, orderByChild, limitToLast, onValue } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 
 export interface Player {
   id: string;
@@ -53,7 +54,7 @@ export async function getLeaderboardPlayers(): Promise<Player[]> {
     // Trier par ELO (descendant)
     return players.sort((a, b) => b.eloRating - a.eloRating);
   } catch (error) {
-    console.error("Erreur chargement leaderboard:", error);
+    logger.error("Erreur chargement leaderboard:", error);
     return [];
   }
 }
@@ -100,7 +101,7 @@ export async function getRecentMatches(limit: number = 10): Promise<Match[]> {
       .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
       .slice(0, limit);
   } catch (error) {
-    console.error("Erreur chargement matchs:", error);
+    logger.error("Erreur chargement matchs:", error);
     return [];
   }
 }
@@ -147,7 +148,7 @@ export async function getQueuedPlayers(): Promise<QueuedPlayer[]> {
 
     return players;
   } catch (error) {
-    console.error("Erreur chargement queue:", error);
+    logger.error("Erreur chargement queue:", error);
     return [];
   }
 }
@@ -199,7 +200,7 @@ export async function getAppStats(): Promise<{
       totalMatches,
     };
   } catch (error) {
-    console.error("Erreur chargement stats:", error);
+    logger.error("Erreur chargement stats:", error);
     return {
       totalPlayers: 0,
       averageElo: 0,

@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from "react
 import { useAuth } from "./AuthContext";
 import { ref, get } from "firebase/database";
 import { database } from "@/lib/firebase";
+import { logger } from '@/utils/logger';
 
 interface ThemeContextType {
   currentTheme: string;
@@ -63,7 +64,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           }
         }
       } catch (error) {
-        console.error("Erreur chargement items équipés:", error);
+        logger.error("Erreur chargement items équipés:", error);
       }
     };
 

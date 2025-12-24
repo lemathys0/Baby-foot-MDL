@@ -3,6 +3,7 @@ import { Gift, Calendar, Flame, Award } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useDailyBonus } from '@/hooks/useDailyBonus';
 import { useAuth } from '@/contexts/AuthContext';
+import { logger } from '@/utils/logger';
 
 export default function BonusHistorySection() {
   const { user } = useAuth();
@@ -26,34 +27,46 @@ export default function BonusHistorySection() {
     );
   }
 
+  // ✅ Vérification de sécurité pour bonusStatus
+  if (!bonusStatus) {
+    logger.warn('⚠️ [BonusHistory] bonusStatus non disponible');
+    return null;
+  }
+
+  // ✅ Valeurs sécurisées avec fallbacks
+  const totalClaimed = bonusStatus.totalClaimed || 0;
+  const streak = bonusStatus.streak || 0;
+  const bonusAmount = bonusStatus.bonusAmount || 5;
+  const canClaim = bonusStatus.canClaim === true;
+
   const stats = [
     {
       icon: Gift,
       label: 'Total reçu',
-      value: `${bonusStatus.totalClaimed}₣`,
+      value: `${totalClaimed}₣`,
       color: 'text-green-500',
       bgColor: 'bg-green-500/20',
     },
     {
       icon: Flame,
       label: 'Série actuelle',
-      value: `${bonusStatus.streak} jour${bonusStatus.streak > 1 ? 's' : ''}`,
+      value: `${streak} jour${streak > 1 ? 's' : ''}`,
       color: 'text-orange-500',
       bgColor: 'bg-orange-500/20',
     },
     {
       icon: Calendar,
       label: 'Par jour',
-      value: `${bonusStatus.bonusAmount}₣`,
+      value: `${bonusAmount}₣`,
       color: 'text-blue-500',
       bgColor: 'bg-blue-500/20',
     },
     {
       icon: Award,
       label: 'Prochain bonus',
-      value: bonusStatus.canClaim ? 'Disponible !' : 'En attente',
-      color: bonusStatus.canClaim ? 'text-green-500' : 'text-muted-foreground',
-      bgColor: bonusStatus.canClaim ? 'bg-green-500/20' : 'bg-muted/20',
+      value: canClaim ? 'Disponible !' : 'En attente',
+      color: canClaim ? 'text-green-500' : 'text-muted-foreground',
+      bgColor: canClaim ? 'bg-green-500/20' : 'bg-muted/20',
     },
   ];
 
@@ -68,7 +81,14 @@ export default function BonusHistorySection() {
       <CardContent>
         <div className="grid grid-cols-2 gap-4">
           {stats.map((stat, index) => {
+            // ✅ Vérification de sécurité AVANT d'utiliser l'icône
+            if (!stat || !stat.icon) {
+              logger.warn('⚠️ [BonusHistory] Stat ou icône manquante:', index);
+              return null;
+            }
+
             const Icon = stat.icon;
+            
             return (
               <motion.div
                 key={index}
@@ -79,7 +99,7 @@ export default function BonusHistorySection() {
               >
                 <div className="flex items-start gap-3">
                   <div className={`rounded-lg p-2 ${stat.bgColor}`}>
-                    <Icon className={`h-5 w-5 ${stat.color}`} />
+                    {Icon && <Icon className={`h-5 w-5 ${stat.color}`} />}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs text-muted-foreground mb-1">
@@ -102,15 +122,15 @@ export default function BonusHistorySection() {
             Série de connexion
           </h4>
           <p className="text-sm text-muted-foreground">
-            Connectez-vous chaque jour pour maintenir votre série et gagner {bonusStatus.bonusAmount}₣ !
-            {bonusStatus.streak > 0 && (
+            Connectez-vous chaque jour pour maintenir votre série et gagner {bonusAmount}₣ !
+            {streak > 0 && (
               <span className="block mt-2 text-orange-500 font-medium">
-                🔥 Vous avez une série de {bonusStatus.streak} jour{bonusStatus.streak > 1 ? 's' : ''} !
+                🔥 Vous avez une série de {streak} jour{streak > 1 ? 's' : ''} !
               </span>
             )}
           </p>
           
-          {bonusStatus.streak >= 7 && (
+          {streak >= 7 && (
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}

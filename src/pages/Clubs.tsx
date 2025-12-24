@@ -6,12 +6,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { notifyAdminAnnouncement } from "@/lib/firebaseNotifications";
 import { notifyFortuneReceived } from "@/lib/firebaseNotifications";
 import { toast } from "@/hooks/use-toast";
 import { ref, get, onValue } from "firebase/database";
 import { database } from "@/lib/firebase";
+import { logger } from '@/utils/logger';
 import {
   createClub,
   joinClub,
@@ -55,6 +57,7 @@ const Clubs = () => {
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showJoinDialog, setShowJoinDialog] = useState(false);
   const [showContributeDialog, setShowContributeDialog] = useState(false);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [myClub, setMyClub] = useState<Club | null>(null);
   const [members, setMembers] = useState<ClubMember[]>([]);
   const [fortune, setFortune] = useState(0);
@@ -118,7 +121,7 @@ const Clubs = () => {
         setIsLoadingMyClub(false);
       }
     }, (error) => {
-      console.error("Erreur chargement données utilisateur:", error);
+      logger.error("Erreur chargement données utilisateur:", error);
       setIsLoadingMyClub(false);
     });
 
@@ -169,7 +172,7 @@ const Clubs = () => {
       
       setAvailableClubs(filtered);
     } catch (error) {
-      console.error("Erreur chargement clubs:", error);
+      logger.error("Erreur chargement clubs:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger les clubs",
@@ -212,7 +215,7 @@ const Clubs = () => {
       "🏆 Club créé avec succès",
       `Votre club "${clubName}" est maintenant actif. Invitez des membres !`
     ).catch(error => {
-      console.error("Erreur notification création:", error);
+      logger.error("Erreur notification création:", error);
     });
     
     toast({
@@ -225,7 +228,7 @@ const Clubs = () => {
     setSelectedLogo(CLUB_LOGOS[0]);
     setSelectedColor(CLUB_COLORS[0]);
   } catch (error: any) {
-    console.error("Erreur création club:", error);
+    logger.error("Erreur création club:", error);
     toast({
       title: "Erreur",
       description: error.message || "Impossible de créer le club",
@@ -282,7 +285,7 @@ const Clubs = () => {
       setShowJoinDialog(false);
       setSearchTerm("");
     } catch (error: any) {
-      console.error("Erreur rejoindre club:", error);
+      logger.error("Erreur rejoindre club:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible de rejoindre le club",
@@ -303,11 +306,13 @@ const Clubs = () => {
       return;
     }
 
-    const confirmed = window.confirm(
-      "Êtes-vous sûr de vouloir quitter ce club ? Vos contributions resteront dans la trésorerie."
-    );
+    // ✅ Ouvrir la confirmation dialog au lieu de window.confirm
+    setShowLeaveConfirm(true);
+  };
 
-    if (!confirmed) return;
+  // ✅ Fonction de confirmation de quitter le club
+  const confirmLeaveClub = async () => {
+    if (!user || !myClub) return;
 
     try {
       await leaveClub(myClub.id, user.uid);
@@ -317,7 +322,7 @@ const Clubs = () => {
         description: "Vous avez quitté le club avec succès",
       });
     } catch (error: any) {
-      console.error("Erreur quitter club:", error);
+      logger.error("Erreur quitter club:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible de quitter le club",
@@ -359,7 +364,7 @@ const Clubs = () => {
       setShowContributeDialog(false);
       setContributionAmount("");
     } catch (error: any) {
-      console.error("Erreur contribution:", error);
+      logger.error("Erreur contribution:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible de contribuer",
@@ -395,7 +400,7 @@ const Clubs = () => {
           "🎁 Nouveau bonus de club",
           `Le bonus "${bonusName}" est maintenant actif pour tous les membres !`
         ).catch(error => {
-          console.error(`Erreur notification pour ${memberId}:`, error);
+          logger.error(`Erreur notification pour ${memberId}:`, error);
         })
       );
       
@@ -413,7 +418,7 @@ const Clubs = () => {
       });
     }
   } catch (error: any) {
-    console.error("Erreur achat bonus:", error);
+    logger.error("Erreur achat bonus:", error);
     toast({
       title: "Erreur",
       description: error.message || "Impossible d'acheter le bonus",
@@ -492,7 +497,7 @@ const Clubs = () => {
 
                 <div>
                   <label className="text-sm font-medium mb-2 block">Logo</label>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                     {CLUB_LOGOS.map((logo) => (
                       <button
                         key={logo}
@@ -511,7 +516,7 @@ const Clubs = () => {
 
                 <div>
                   <label className="text-sm font-medium mb-2 block">Couleur</label>
-                  <div className="grid grid-cols-6 gap-2">
+                  <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
                     {CLUB_COLORS.map((color) => (
                       <button
                         key={color}
@@ -846,6 +851,17 @@ const Clubs = () => {
           </DialogContent>
         </Dialog>
       </motion.div>
+      {/* ✅ Confirmation dialog pour quitter le club */}
+      <ConfirmDialog
+        open={showLeaveConfirm}
+        onOpenChange={setShowLeaveConfirm}
+        title="Quitter le club"
+        description="Êtes-vous sûr de vouloir quitter ce club ? Vos contributions resteront dans la trésorerie."
+        confirmText="Quitter"
+        cancelText="Annuler"
+        onConfirm={confirmLeaveClub}
+        variant="destructive"
+      />
     </AppLayout>
   );
 };

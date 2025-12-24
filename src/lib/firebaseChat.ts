@@ -3,6 +3,7 @@
 
 import { ref, get, set, push, update, onValue, off, remove, query, orderByChild, limitToLast } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 
 // ============================
 // 📋 TYPES
@@ -96,9 +97,9 @@ export async function createAdminChat(adminUserId: string): Promise<void> {
 
     await set(adminChatRef, adminChat);
     await set(ref(database, `userChats/${adminUserId}/admin_chat`), true);
-    console.log("✅ Chat admin créé");
+    logger.log("✅ Chat admin créé");
   } catch (error) {
-    console.error("Erreur création chat admin:", error);
+    logger.error("Erreur création chat admin:", error);
     throw error;
   }
 }
@@ -112,7 +113,7 @@ export async function createAdminInfoChannel(adminUserId: string): Promise<void>
     const snapshot = await get(infoChannelRef);
     
     if (snapshot.exists()) {
-      console.log("✅ Canal info admin existe déjà");
+      logger.log("✅ Canal info admin existe déjà");
       return;
     }
 
@@ -128,9 +129,9 @@ export async function createAdminInfoChannel(adminUserId: string): Promise<void>
     };
 
     await set(infoChannelRef, infoChannel);
-    console.log("✅ Canal info admin créé");
+    logger.log("✅ Canal info admin créé");
   } catch (error) {
-    console.error("Erreur création canal info:", error);
+    logger.error("Erreur création canal info:", error);
     throw error;
   }
 }
@@ -175,7 +176,7 @@ export async function createOrGetPrivateChat(
 
     return chatId;
   } catch (error) {
-    console.error("Erreur création chat privé:", error);
+    logger.error("Erreur création chat privé:", error);
     throw error;
   }
 }
@@ -228,7 +229,7 @@ export async function createGroupChat(
 
     return chatId;
   } catch (error) {
-    console.error("Erreur création groupe:", error);
+    logger.error("Erreur création groupe:", error);
     throw error;
   }
 }
@@ -293,7 +294,7 @@ export async function sendMessage(
 
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur envoi message:", error);
+    logger.error("Erreur envoi message:", error);
     throw error;
   }
 }
@@ -319,7 +320,7 @@ export async function sendAdminInfo(
     // Envoyer le message
     await sendMessage("admin_info", adminUserId, `📢 ${adminUsername}`, text);
   } catch (error) {
-    console.error("Erreur envoi info admin:", error);
+    logger.error("Erreur envoi info admin:", error);
     throw error;
   }
 }
@@ -371,7 +372,7 @@ export async function getUserChats(userId: string, userRole?: string): Promise<C
       return bTime - aTime;
     });
   } catch (error) {
-    console.error("Erreur récupération chats:", error);
+    logger.error("Erreur récupération chats:", error);
     return [];
   }
 }
@@ -388,7 +389,7 @@ export async function getChatMessages(
     try {
       messagesQuery = query(messagesRef, orderByChild("ts"), limitToLast(limit));
     } catch (indexError) {
-      console.warn("Index non configuré, utilisation de orderByKey", indexError);
+      logger.warn("Index non configuré, utilisation de orderByKey", indexError);
       messagesQuery = query(messagesRef, limitToLast(limit));
     }
     
@@ -399,7 +400,7 @@ export async function getChatMessages(
     const messages = Object.values(snapshot.val()) as ChatMessage[];
     return messages.sort((a, b) => a.ts - b.ts);
   } catch (error) {
-    console.error("Erreur récupération messages:", error);
+    logger.error("Erreur récupération messages:", error);
     return [];
   }
 }
@@ -416,7 +417,7 @@ export function onChatMessages(
   try {
     messagesQuery = query(messagesRef, orderByChild("ts"), limitToLast(limit));
   } catch (indexError) {
-    console.warn("Index non configuré, utilisation de orderByKey", indexError);
+    logger.warn("Index non configuré, utilisation de orderByKey", indexError);
     messagesQuery = query(messagesRef, limitToLast(limit));
   }
 
@@ -432,7 +433,7 @@ export function onChatMessages(
       callback(messages.sort((a, b) => a.ts - b.ts));
     },
     (error) => {
-      console.error("Erreur écoute messages:", error);
+      logger.error("Erreur écoute messages:", error);
       callback([]);
     }
   );
@@ -488,7 +489,7 @@ export function onUserChats(
       callback(chats);
     },
     (error) => {
-      console.error("Erreur écoute chats:", error);
+      logger.error("Erreur écoute chats:", error);
       callback([]);
     }
   );
@@ -542,7 +543,7 @@ export async function addMemberToGroup(
 
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur ajout membre:", error);
+    logger.error("Erreur ajout membre:", error);
     throw error;
   }
 }
@@ -584,7 +585,7 @@ export async function removeMemberFromGroup(
 
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur retrait membre:", error);
+    logger.error("Erreur retrait membre:", error);
     throw error;
   }
 }
@@ -629,7 +630,7 @@ export async function deleteGroupChat(
 
     await update(ref(database), updates);
   } catch (error) {
-    console.error("Erreur suppression groupe:", error);
+    logger.error("Erreur suppression groupe:", error);
     throw error;
   }
 }
@@ -660,7 +661,7 @@ export async function searchUsers(query: string, currentUserId: string): Promise
 
     return results.slice(0, 20);
   } catch (error) {
-    console.error("Erreur recherche utilisateurs:", error);
+    logger.error("Erreur recherche utilisateurs:", error);
     return [];
   }
 }

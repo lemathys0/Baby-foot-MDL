@@ -26,7 +26,7 @@ export async function safeFirebaseQuery<T>(
       return { data, error: null };
     } catch (error: any) {
       lastError = error;
-      console.error(`Firebase query attempt ${attempt + 1}/${retries} failed:`, error);
+      logger.error(`Firebase query attempt ${attempt + 1}/${retries} failed:`, error);
       
       // Si ce n'est pas la dernière tentative, attendre avant de réessayer
       if (attempt < retries - 1) {

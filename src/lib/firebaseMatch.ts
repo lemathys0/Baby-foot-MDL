@@ -4,6 +4,9 @@
 import { ref, set, remove, get, push, update, onDisconnect, onValue, runTransaction } from "firebase/database";
 import { database } from "./firebase";
 import { addFortuneHistoryEntry } from "./firebaseExtended";
+import { logger } from "@/utils/logger";
+import { applyXPBonus, applyFortuneBonus, getClubBonuses } from "./clubBonusSystem";
+import { optimizeMatchData, optimizeBetData, MATCH_TYPE_ENUM } from "./dbOptimization";
 
 // ============================
 // 🏆 ELO RANKS SYSTEM
@@ -89,7 +92,7 @@ export async function joinMatchQueue(
     });
     onDisconnect(queueRef).remove();
   } catch (error) {
-    console.error("Erreur lors de l'ajout à la queue:", error);
+    logger.error("Erreur lors de l'ajout à la queue:", error);
     throw new Error("Impossible de rejoindre la file d'attente");
   }
 }
@@ -99,7 +102,7 @@ export async function leaveMatchQueue(userId: string): Promise<void> {
     const queueRef = ref(database, `matchQueue/${userId}`);
     await remove(queueRef);
   } catch (error) {
-    console.error("Erreur lors du retrait de la queue:", error);
+    logger.error("Erreur lors du retrait de la queue:", error);
     throw new Error("Impossible de quitter la file d'attente");
   }
 }
@@ -110,7 +113,7 @@ export async function isPlayerInQueue(userId: string): Promise<boolean> {
     const snapshot = await get(queueRef);
     return snapshot.exists();
   } catch (error) {
-    console.error("Erreur lors de la vérification de la queue:", error);
+    logger.error("Erreur lors de la vérification de la queue:", error);
     return false;
   }
 }
@@ -194,7 +197,13 @@ export async function createMatchForBetting(
     if (!usersSnapshot.exists()) {
       throw new Error("Aucun utilisateur trouvé");
     }
-    const users = usersSnapshot.val();
+    const rawUsers = usersSnapshot.val();
+
+    // Déoptimiser les données utilisateur pour accéder au username
+    const users: Record<string, any> = {};
+    Object.keys(rawUsers).forEach(userId => {
+      users[userId] = deoptimizeUserData(rawUsers[userId]);
+    });
     
     // ✅ VALIDATION: Vérifier que tous les joueurs existent
     const allPlayerIds = [...team1PlayerIds, ...team2PlayerIds];
@@ -230,7 +239,7 @@ export async function createMatchForBetting(
     await set(newMatchRef, matchData);
     return matchId;
   } catch (error) {
-    console.error("Erreur lors de la création du match:", error);
+    logger.error("Erreur lors de la création du match:", error);
     throw error;
   }
 }
@@ -242,7 +251,7 @@ export async function placeBet(
   amount: number,
   teamBet: 1 | 2
 ): Promise<void> {
-  console.log(`📌 [PARI] Début placeBet - User: ${username}, Match: ${matchId}, Montant: ${amount}€, Équipe: ${teamBet}`);
+  logger.log(`📌 [PARI] Début placeBet - User: ${username}, Match: ${matchId}, Montant: ${amount}€, Équipe: ${teamBet}`);
   
   try {
     // ✅ VALIDATION ANTI-TRICHE
@@ -261,8 +270,8 @@ export async function placeBet(
     // ✅ CHARGER LES DONNÉES EN AMONT pour éviter les erreurs de transaction
     const matchRef = ref(database, `bettingMatches/${matchId}`);
     const userRef = ref(database, `users/${userId}`);
-    
-    console.log(`🔍 [PARI] Chargement des données...`);
+
+    logger.log(`🔍 [PARI] Chargement des données...`);
     const [matchSnapshot, userSnapshot] = await Promise.all([
       get(matchRef),
       get(userRef)
@@ -278,8 +287,8 @@ export async function placeBet(
 
     const match = matchSnapshot.val() as MatchWithBetting;
     const userData = userSnapshot.val();
-    
-    console.log(`✅ [PARI] Données chargées - Match status: ${match.status}, User fortune: ${userData.fortune}€`);
+
+    logger.log(`✅ [PARI] Données chargées - Match status: ${match.status}, User fortune: ${userData.fortune}€`);
     
     if (match.status !== "open") {
       throw new Error("Les paris sont fermés pour ce match");
@@ -301,7 +310,7 @@ export async function placeBet(
     const oldBet = match.bets?.[userId];
     const availableFortune = oldBet ? beforeFortune + oldBet.amount : beforeFortune;
 
-    console.log(`💰 [PARI] Fortune avant: ${beforeFortune}€, Disponible: ${availableFortune}€`);
+    logger.log(`💰 [PARI] Fortune avant: ${beforeFortune}€, Disponible: ${availableFortune}€`);
 
     if (availableFortune < amount) {
       throw new Error(`Vous n'avez pas assez d'argent (${availableFortune}€ disponibles)`);
@@ -324,7 +333,7 @@ export async function placeBet(
       } else {
         newTotal2 -= oldBet.amount;
       }
-      console.log(`🔄 [PARI] Ancien pari trouvé: ${oldBet.amount}€ sur équipe ${oldBet.teamBet}`);
+      logger.log(`🔄 [PARI] Ancien pari trouvé: ${oldBet.amount}€ sur équipe ${oldBet.teamBet}`);
     }
     
     // Ajouter le nouveau pari
@@ -333,8 +342,8 @@ export async function placeBet(
     } else {
       newTotal2 += amount;
     }
-    
-    console.log(`📊 [PARI] Nouveaux totaux - Équipe 1: ${newTotal1}€, Équipe 2: ${newTotal2}€`);
+
+    logger.log(`📊 [PARI] Nouveaux totaux - Équipe 1: ${newTotal1}€, Équipe 2: ${newTotal2}€`);
 
     // ✅ MISE À JOUR ATOMIQUE AVEC update() au lieu de transactions séparées
     const updates: { [path: string]: any } = {};
@@ -355,35 +364,35 @@ export async function placeBet(
     updates[`bettingMatches/${matchId}/totalBetsTeam1`] = newTotal1;
     updates[`bettingMatches/${matchId}/totalBetsTeam2`] = newTotal2;
 
-    console.log(`💾 [PARI] Application des mises à jour atomiques...`);
+    logger.log(`💾 [PARI] Application des mises à jour atomiques...`);
     await update(ref(database), updates);
-    
-    console.log(`✅ [PARI] Fortune après déduction: ${newFortune}€`);
+
+    logger.log(`✅ [PARI] Fortune après déduction: ${newFortune}€`);
 
     // ✅ Historique de fortune
     const delta = newFortune - beforeFortune;
     if (delta !== 0) {
       const reason = `Pari sur match: ${match.team1Names?.join(" & ") ?? "Équipe 1"} vs ${match.team2Names?.join(" & ") ?? "Équipe 2"}`;
       await addFortuneHistoryEntry(userId, newFortune, delta, reason);
-      console.log(`📝 [PARI] Historique ajouté: ${delta}€`);
+      logger.log(`📝 [PARI] Historique ajouté: ${delta}€`);
     }
 
-    console.log(`✅ [PARI] Pari placé avec succès!`);
+    logger.log(`✅ [PARI] Pari placé avec succès!`);
   } catch (error) {
-    console.error(`❌ [PARI] Erreur:`, error);
+    logger.error(`❌ [PARI] Erreur:`, error);
     throw error;
   }
 }
 
 
 export async function startMatch(matchId: string): Promise<void> {
-  console.log(`🎬 [START MATCH] Début startMatch - Match: ${matchId}`);
-  
+  logger.log(`🎬 [START MATCH] Début startMatch - Match: ${matchId}`);
+
   try {
     const matchRef = ref(database, `bettingMatches/${matchId}`);
-    
+
     // ✅ AMÉLIORATION: Charger les données en amont comme pour placeBet
-    console.log(`🔍 [START MATCH] Chargement des données du match...`);
+    logger.log(`🔍 [START MATCH] Chargement des données du match...`);
     const matchSnapshot = await get(matchRef);
     
     if (!matchSnapshot.exists()) {
@@ -391,7 +400,7 @@ export async function startMatch(matchId: string): Promise<void> {
     }
     
     const match = matchSnapshot.val() as MatchWithBetting;
-    console.log(`✅ [START MATCH] Match chargé - Status: ${match.status}`);
+    logger.log(`✅ [START MATCH] Match chargé - Status: ${match.status}`);
     
     if (match.status !== "open") {
       throw new Error("Le match n'est pas en attente de démarrage");
@@ -401,13 +410,13 @@ export async function startMatch(matchId: string): Promise<void> {
     const updates: { [path: string]: any } = {};
     updates[`bettingMatches/${matchId}/status`] = "playing";
     updates[`bettingMatches/${matchId}/startedAt`] = Date.now();
-    
-    console.log(`💾 [START MATCH] Application de la mise à jour...`);
+
+    logger.log(`💾 [START MATCH] Application de la mise à jour...`);
     await update(ref(database), updates);
-    
-    console.log(`✅ [START MATCH] Match démarré avec succès!`);
+
+    logger.log(`✅ [START MATCH] Match démarré avec succès!`);
   } catch (error) {
-    console.error("❌ [START MATCH] Erreur:", error);
+    logger.error("❌ [START MATCH] Erreur:", error);
     throw error;
   }
 }
@@ -448,7 +457,7 @@ export async function finishMatch(
   score1: number,
   score2: number
 ): Promise<{ eloUpdates: EloUpdate[]; winnings: { [userId: string]: number } }> {
-  console.log(`🏁 [FIN MATCH] Début finishMatch - Match: ${matchId}, Score: ${score1}-${score2}`);
+  logger.log(`🏁 [FIN MATCH] Début finishMatch - Match: ${matchId}, Score: ${score1}-${score2}`);
   
   try {
     // ✅ VALIDATION
@@ -481,8 +490,8 @@ export async function finishMatch(
       throw new Error("Ce match est déjà terminé");
     }
 
-    console.log(`📊 [FIN MATCH] Total paris - Équipe 1: ${match.totalBetsTeam1}€, Équipe 2: ${match.totalBetsTeam2}€`);
-    console.log(`📊 [FIN MATCH] Nombre de parieurs: ${Object.keys(match.bets || {}).length}`);
+    logger.log(`📊 [FIN MATCH] Total paris - Équipe 1: ${match.totalBetsTeam1}€, Équipe 2: ${match.totalBetsTeam2}€`);
+    logger.log(`📊 [FIN MATCH] Nombre de parieurs: ${Object.keys(match.bets || {}).length}`);
 
     const suspicious = await isSuspiciousMatch(match.team1, match.team2, score1, score2);
 
@@ -546,12 +555,20 @@ export async function finishMatch(
     const eloUpdates: EloUpdate[] = [];
     const updates: { [path: string]: unknown } = {};
 
-    const updatePlayerElo = (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
+    const updatePlayerElo = async (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
       if (suspicious) return;
-      
-      const newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
+
+      let newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
+      const baseEloChange = newElo - player.eloRating;
+
+      // ✅ BONUS CLUB: Appliquer le bonus XP (ELO)
+      const clubBonuses = await getClubBonuses(player.id);
+      if (clubBonuses.xpBoost && won) {
+        newElo = applyXPBonus(newElo, player.eloRating);
+        logger.log(`🎯 [Bonus Club] ${player.username}: ELO ${player.eloRating} → ${newElo} (avec bonus +20%)`);
+      }
+
       const eloChange = newElo - player.eloRating;
-      
       const eloField = matchType === "1v1" ? "elo1v1" : matchType === "2v2" ? "elo2v2" : "eloGlobal";
       updates[`users/${player.id}/${eloField}`] = newElo;
       
@@ -575,10 +592,26 @@ export async function finishMatch(
       
       const winsField = `wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`;
       const lossesField = `losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`;
-      
+
       updates[`users/${player.id}/${winsField}`] = won ? player.wins + 1 : player.wins;
       updates[`users/${player.id}/${lossesField}`] = won ? player.losses : player.losses + 1;
-      
+
+      // ✅ TRACKING: WinStreak (série de victoires) pour badge "Tueur de Gamelles"
+      const currentWinStreak = user.winStreak || 0;
+      if (won) {
+        updates[`users/${player.id}/winStreak`] = currentWinStreak + 1;
+      } else {
+        updates[`users/${player.id}/winStreak`] = 0; // Reset si perte
+      }
+
+      // ✅ TRACKING: Thursday wins pour badge "Roi du Jeudi"
+      const today = new Date();
+      const isThursday = today.getDay() === 4; // 4 = jeudi
+      if (won && isThursday) {
+        const currentThursdayWins = user.thursdayWins || 0;
+        updates[`users/${player.id}/thursdayWins`] = currentThursdayWins + 1;
+      }
+
       const rank = getEloRank(newElo);
       
       eloUpdates.push({
@@ -592,8 +625,11 @@ export async function finishMatch(
       });
     };
 
-    team1Players.forEach(player => updatePlayerElo(player, team2AvgElo, team1Won));
-    team2Players.forEach(player => updatePlayerElo(player, team1AvgElo, !team1Won));
+    // ✅ Application asynchrone des bonus club
+    await Promise.all([
+      ...team1Players.map(player => updatePlayerElo(player, team2AvgElo, team1Won)),
+      ...team2Players.map(player => updatePlayerElo(player, team1AvgElo, !team1Won))
+    ]);
 
     // ============================================
     // 🎯 DISTRIBUTION DES GAINS AVEC MINIMUM 1.10x
@@ -606,13 +642,13 @@ export async function finishMatch(
     const winnings: { [userId: string]: number } = {};
     const historyPromises: Promise<void>[] = [];
 
-    console.log(`🏆 [FIN MATCH] Équipe gagnante: ${winningTeam}`);
-    console.log(`💰 [FIN MATCH] Pot gagnant: ${winningPot}€, Pot perdant: ${losingPot}€, Total: ${totalPot}€`);
+    logger.log(`🏆 [FIN MATCH] Équipe gagnante: ${winningTeam}`);
+    logger.log(`💰 [FIN MATCH] Pot gagnant: ${winningPot}€, Pot perdant: ${losingPot}€, Total: ${totalPot}€`);
 
     if (match.bets && Object.keys(match.bets).length > 0) {
       // ✅ Traiter TOUS les parieurs (gagnants ET perdants)
       for (const [betUserId, bet] of Object.entries(match.bets)) {
-        console.log(`👤 [FIN MATCH] Traitement pari de ${bet.username}: ${bet.amount}€ sur équipe ${bet.teamBet}`);
+        logger.log(`👤 [FIN MATCH] Traitement pari de ${bet.username}: ${bet.amount}€ sur équipe ${bet.teamBet}`);
         
         if (bet.teamBet === winningTeam) {
           // ✅ GAGNANT - APPLICATION DU MINIMUM 1.10x
@@ -624,8 +660,8 @@ export async function finishMatch(
             
             winnings[betUserId] = totalWinning;
             const netProfit = totalWinning - bet.amount;
-            
-            console.log(`✅ [FIN MATCH] ${bet.username} GAGNE ${totalWinning}€ (mise: ${bet.amount}€, profit: ${netProfit}€, cote: ${finalOdds.toFixed(2)}x)`);
+
+            logger.log(`✅ [FIN MATCH] ${bet.username} GAGNE ${totalWinning}€ (mise: ${bet.amount}€, profit: ${netProfit}€, cote: ${finalOdds.toFixed(2)}x)`);
             
             const userRef = ref(database, `users/${betUserId}`);
             const userSnapshot = await get(userRef);
@@ -634,17 +670,31 @@ export async function finishMatch(
               const userData = userSnapshot.val();
               const currentFortune = userData.fortune || 0;
               const currentBettingGains = userData.bettingGains || 0;
-              const newFortune = currentFortune + totalWinning;
-              
+
+              // ✅ BONUS CLUB: Appliquer le bonus Fortune (+15%)
+              const clubBonuses = await getClubBonuses(betUserId);
+              let finalWinning = totalWinning;
+              if (clubBonuses.fortuneBoost) {
+                finalWinning = applyFortuneBonus(totalWinning);
+                logger.log(`💰 [Bonus Club] ${bet.username}: Gain ${totalWinning}€ → ${finalWinning}€ (avec bonus +15%)`);
+              }
+
+              const newFortune = currentFortune + finalWinning;
+              const finalProfit = finalWinning - bet.amount;
+
               updates[`users/${betUserId}/fortune`] = newFortune;
-              updates[`users/${betUserId}/bettingGains`] = currentBettingGains + netProfit;
-              updates[`users/${betUserId}/totalEarned`] = (userData.totalEarned || 0) + netProfit;
+              updates[`users/${betUserId}/bettingGains`] = currentBettingGains + finalProfit;
+              updates[`users/${betUserId}/totalEarned`] = (userData.totalEarned || 0) + finalProfit;
+
+              // ✅ TRACKING: betWins pour badge "Parieur Fou"
+              const currentBetWins = userData.betWins || 0;
+              updates[`users/${betUserId}/betWins`] = currentBetWins + 1;
 
               historyPromises.push(
                 addFortuneHistoryEntry(
                   betUserId,
                   newFortune,
-                  totalWinning,
+                  finalWinning,
                   `Gain pari: ${match.team1Names?.join(" & ") ?? "Équipe 1"} vs ${match.team2Names?.join(" & ") ?? "Équipe 2"}`
                 )
               );
@@ -652,8 +702,8 @@ export async function finishMatch(
           } else {
             // ✅ CAS LIMITE: Remboursement si personne n'a parié sur l'équipe gagnante
             winnings[betUserId] = bet.amount;
-            
-            console.log(`🔄 [FIN MATCH] ${bet.username} REMBOURSÉ ${bet.amount}€ (aucun pari sur équipe gagnante)`);
+
+            logger.log(`🔄 [FIN MATCH] ${bet.username} REMBOURSÉ ${bet.amount}€ (aucun pari sur équipe gagnante)`);
             
             const userRef = ref(database, `users/${betUserId}`);
             const userSnapshot = await get(userRef);
@@ -678,8 +728,8 @@ export async function finishMatch(
         } else {
           // ✅ PERDANT - TRACER EXPLICITEMENT LA PERTE
           winnings[betUserId] = -bet.amount;
-          
-          console.log(`❌ [FIN MATCH] ${bet.username} PERD ${bet.amount}€`);
+
+          logger.log(`❌ [FIN MATCH] ${bet.username} PERD ${bet.amount}€`);
           
           const userRef = ref(database, `users/${betUserId}`);
           const userSnapshot = await get(userRef);
@@ -706,27 +756,26 @@ export async function finishMatch(
       }
     }
 
-    console.log(`📊 [FIN MATCH] Résumé des gains:`, winnings);
+    logger.log(`📊 [FIN MATCH] Résumé des gains:`, winnings);
 
     // Enregistrer dans l'historique
     const recentMatchesRef = ref(database, "matches");
     const newRecentMatchRef = push(recentMatchesRef);
-    
-    updates[`matches/${newRecentMatchRef.key}`] = {
-      id: newRecentMatchRef.key,
+
+    // ✅ OPTIMISÉ: Structure compactée (sans team1Names/team2Names, clés abrégées, timestamp en secondes)
+    const matchDataOptimized = optimizeMatchData({
       team1: match.team1,
       team2: match.team2,
-      team1Names: match.team1Names,
-      team2Names: match.team2Names,
       matchType,
       score1,
       score2,
-      date: new Date().toISOString(),
       timestamp: Date.now(),
       recordedBy: match.createdBy,
       fromBetting: true,
       suspicious,
-    };
+    });
+
+    updates[`matches/${newRecentMatchRef.key}`] = matchDataOptimized;
 
     updates[`bettingMatches/${matchId}/status`] = "finished";
     updates[`bettingMatches/${matchId}/score1`] = score1;
@@ -738,11 +787,24 @@ export async function finishMatch(
 
     invalidatePlayerCache();
 
-    console.log(`✅ [FIN MATCH] Match terminé avec succès!`);
+    // ✅ ACHIEVEMENTS: Vérifier les achievements automatiquement pour tous les joueurs
+    const { checkAchievements } = await import("./firebaseExtended");
+    const matchPlayers = [...match.team1, ...match.team2];
+    await Promise.all(
+      matchPlayers.map(async (playerId) => {
+        try {
+          await checkAchievements(playerId);
+        } catch (error) {
+          logger.error(`Erreur vérification achievements pour ${playerId}:`, error);
+        }
+      })
+    );
+
+    logger.log(`✅ [FIN MATCH] Match terminé avec succès!`);
 
     return { eloUpdates, winnings };
   } catch (error) {
-    console.error("❌ [FIN MATCH] Erreur:", error);
+    logger.error("❌ [FIN MATCH] Erreur:", error);
     throw error;
   }
 }
@@ -871,14 +933,22 @@ export async function recordMatch(
     const eloUpdates: EloUpdate[] = [];
     const updates: { [path: string]: unknown } = {};
 
-    const updatePlayerElo = (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
+    const updatePlayerElo = async (player: { id: string; username: string; eloRating: number; wins: number; losses: number }, opponentAvgElo: number, won: boolean) => {
       // Si le match est suspect, on enregistre le match mais on ne met pas à jour l'ELO
       if (suspicious) {
         return;
       }
-      const newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
+      let newElo = calculateNewElo(player.eloRating, opponentAvgElo, won);
+      const baseEloChange = newElo - player.eloRating;
+
+      // ✅ BONUS CLUB: Appliquer le bonus XP (ELO)
+      const clubBonuses = await getClubBonuses(player.id);
+      if (clubBonuses.xpBoost && won) {
+        newElo = applyXPBonus(newElo, player.eloRating);
+        logger.log(`🎯 [Bonus Club] ${player.username}: ELO ${player.eloRating} → ${newElo} (avec bonus +20%)`);
+      }
+
       const eloChange = newElo - player.eloRating;
-      
       const eloField = matchType === "1v1" ? "elo1v1" : matchType === "2v2" ? "elo2v2" : "eloGlobal";
       updates[`users/${player.id}/${eloField}`] = newElo;
       
@@ -912,10 +982,26 @@ export async function recordMatch(
       
       const winsField = `wins${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`;
       const lossesField = `losses${matchType === "1v1" ? "1v1" : matchType === "2v2" ? "2v2" : "Mixed"}`;
-      
+
       updates[`users/${player.id}/${winsField}`] = won ? player.wins + 1 : player.wins;
       updates[`users/${player.id}/${lossesField}`] = won ? player.losses : player.losses + 1;
-      
+
+      // ✅ TRACKING: WinStreak (série de victoires) pour badge "Tueur de Gamelles"
+      const currentWinStreak = user.winStreak || 0;
+      if (won) {
+        updates[`users/${player.id}/winStreak`] = currentWinStreak + 1;
+      } else {
+        updates[`users/${player.id}/winStreak`] = 0; // Reset si perte
+      }
+
+      // ✅ TRACKING: Thursday wins pour badge "Roi du Jeudi"
+      const today = new Date();
+      const isThursday = today.getDay() === 4; // 4 = jeudi
+      if (won && isThursday) {
+        const currentThursdayWins = user.thursdayWins || 0;
+        updates[`users/${player.id}/thursdayWins`] = currentThursdayWins + 1;
+      }
+
       const rank = getEloRank(newElo);
       
       eloUpdates.push({
@@ -929,29 +1015,27 @@ export async function recordMatch(
       });
     };
 
-    team1Players.forEach(player => updatePlayerElo(player, team2AvgElo, team1Won));
-    team2Players.forEach(player => updatePlayerElo(player, team1AvgElo, !team1Won));
+    // ✅ Application asynchrone des bonus club
+    await Promise.all([
+      ...team1Players.map(player => updatePlayerElo(player, team2AvgElo, team1Won)),
+      ...team2Players.map(player => updatePlayerElo(player, team1AvgElo, !team1Won))
+    ]);
 
     const matchesRef = ref(database, "matches");
     const newMatchRef = push(matchesRef);
-    
-    const team1Names = team1Players.map(p => p.username);
-    const team2Names = team2Players.map(p => p.username);
-    
-    const matchData = {
-      id: newMatchRef.key,
+
+    // ✅ OPTIMISÉ: Structure compactée (sans team1Names/team2Names, clés abrégées, timestamp en secondes)
+    const matchData = optimizeMatchData({
       team1: team1PlayerIds,
       team2: team2PlayerIds,
-      team1Names,
-      team2Names,
       matchType,
       score1,
       score2,
-      date: new Date().toISOString(),
       timestamp: Date.now(),
       recordedBy,
       suspicious,
-    };
+      fromBetting: false,
+    });
 
     updates[`matches/${newMatchRef.key}`] = matchData;
 
@@ -960,9 +1044,50 @@ export async function recordMatch(
     // ✅ OPTIMISATION: Invalider le cache après un match pour refléter les nouveaux ELO
     invalidatePlayerCache();
 
+    // ✅ ACHIEVEMENTS: Vérifier les achievements automatiquement pour tous les joueurs
+    // (réutilise allPlayerIds défini ligne 869)
+    const { checkAchievements } = await import("./firebaseExtended");
+    await Promise.all(
+      allPlayerIds.map(async (playerId) => {
+        try {
+          await checkAchievements(playerId);
+        } catch (error) {
+          logger.error(`Erreur vérification achievements pour ${playerId}:`, error);
+        }
+      })
+    );
+
+    // ✅ QUÊTES: Mettre à jour la progression des quêtes pour tous les joueurs
+    const { updateQuestProgress } = await import("./questSystem");
+    await Promise.all(
+      allPlayerIds.map(async (playerId) => {
+        try {
+          // Quête: "Jouer X matchs"
+          await updateQuestProgress(playerId, 'match', 1);
+
+          // Quête: "Gagner X matchs 1v1" ou "Gagner X matchs 2v2"
+          const won = (team1Won && team1PlayerIds.includes(playerId)) ||
+                      (!team1Won && team2PlayerIds.includes(playerId));
+
+          if (won) {
+            // Mettre à jour la quête spécifique au mode
+            if (matchType === '1v1') {
+              await updateQuestProgress(playerId, 'win_1v1', 1);
+            } else if (matchType === '2v2') {
+              await updateQuestProgress(playerId, 'win_2v2', 1);
+            }
+            // Aussi mettre à jour la quête générale "Gagner X matchs"
+            await updateQuestProgress(playerId, 'win_any', 1);
+          }
+        } catch (error) {
+          logger.error(`Erreur mise à jour quêtes pour ${playerId}:`, error);
+        }
+      })
+    );
+
     return { eloUpdates };
   } catch (error) {
-    console.error("Erreur lors de l'enregistrement du match:", error);
+    logger.error("Erreur lors de l'enregistrement du match:", error);
     throw error;
   }
 }
@@ -1045,7 +1170,7 @@ async function isSuspiciousMatch(
 
     return false;
   } catch (error) {
-    console.error("Erreur détection match suspicieux:", error);
+    logger.error("Erreur détection match suspicieux:", error);
     return false;
   }
 }
@@ -1067,7 +1192,7 @@ export async function getOpenMatches(): Promise<MatchWithBetting[]> {
 
     return matches.sort((a, b) => b.createdAt - a.createdAt);
   } catch (error) {
-    console.error("Erreur lors de la récupération des matchs:", error);
+    logger.error("Erreur lors de la récupération des matchs:", error);
     return [];
   }
 }
@@ -1127,7 +1252,7 @@ export async function getAvailablePlayers(useCache = true): Promise<Array<{
     playerCache.set(cacheKey, { data: result, timestamp: Date.now() });
     return result;
   } catch (error) {
-    console.error("Erreur lors de la récupération des joueurs:", error);
+    logger.error("Erreur lors de la récupération des joueurs:", error);
     // ✅ En cas d'erreur, retourner le cache si disponible
     if (cached) {
       return cached.data;
@@ -1180,7 +1305,7 @@ export async function getPlayersByIds(playerIds: string[]): Promise<Record<strin
           };
         }
       } catch (error) {
-        console.error(`Erreur chargement joueur ${id}:`, error);
+        logger.error(`Erreur chargement joueur ${id}:`, error);
       }
     })
   );

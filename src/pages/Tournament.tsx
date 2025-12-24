@@ -1,109 +1,84 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Trophy, Users, Clock, Star, AlertCircle, UserPlus, Zap, Loader2, Search, ArrowRight } from "lucide-react";
+import { Trophy, Users, Clock, Star, AlertCircle, UserPlus, Zap, Loader2, Search, ArrowRight, Crown, Medal, CheckCircle2, TrendingUp, Calendar, Sparkles, XCircle } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "@/hooks/use-toast";
-import { ref, get, set, update, push } from "firebase/database";
+import { ref, get, update, set } from "firebase/database";
+import { database } from "@/lib/firebase";
+import { searchUsers, UserProfile, addFortuneHistoryEntry } from "@/lib/firebaseExtended";
 import { 
   notifyTournamentStarting, 
   notifyFortuneReceived 
 } from "@/lib/firebaseNotifications";
-import { database } from "@/lib/firebase";
-import { searchUsers, UserProfile, addFortuneHistoryEntry } from "@/lib/firebaseExtended";
-
-interface TournamentPlayer {
-  userId: string;
-  username: string;
-  eloRating: number;
-  partnerId?: string;
-  partnerUsername?: string;
-}
-
-interface Match {
-  id: string;
-  round: number;
-  team1: {
-    playerIds: string[];
-    playerNames: string[];
-    partnerId: string | null;
-    partnerName: string | null;
-  };
-  team2: {
-    playerIds: string[];
-    playerNames: string[];
-    partnerId: string | null;
-    partnerName: string | null;
-  };
-  status: "pending" | "in_progress" | "completed";
-  startTime: number;
-  score1: number;
-  score2: number;
-  winnerId?: string;
-}
-
-interface Tournament {
-  id: string;
-  startTime: number;
-  endTime: number;
-  isActive: boolean;
-  players: TournamentPlayer[];
-  matches: { [key: string]: Match };
-  winners: string[];
-  prizePool: number;
-  status?: string;
-  currentRound: number;
-}
+import { logger } from '@/utils/logger';
+import {
+  createNextRoundSafe,
+  finishMatchSafe,
+  checkRoundCompletion,
+  distributeTournamentPrizes,
+  Tournament as TournamentType,
+  TournamentMatch,
+  TournamentPlayer
+} from "@/lib/firebaseTournament";
 
 const TOURNAMENT_START = 13; // 13h
 const TOURNAMENT_END = 14.25; // 14h15
-const MATCH_DURATION = 5; // 5 minutes
-const ENTRY_FEE_SOLO = 50; // 50€ en solo
-const ENTRY_FEE_DUO = 25; // 25€ par personne en duo
+const ENTRY_FEE_SOLO = 50;
+const ENTRY_FEE_DUO = 25;
 
 const Tournament = () => {
   const { user, userProfile } = useAuth();
-  const [currentTournament, setCurrentTournament] = useState<Tournament | null>(null);
+  const [currentView, setCurrentView] = useState<"overview" | "matches" | "leaderboard">("overview");
+  const [selectedRound, setSelectedRound] = useState(1);
+  const [currentTournament, setCurrentTournament] = useState<TournamentType | null>(null);
   const [isRegistered, setIsRegistered] = useState(false);
-  const [showRulesDialog, setShowRulesDialog] = useState(false);
-  const [showRegisterDialog, setShowRegisterDialog] = useState(false);
   const [playMode, setPlayMode] = useState<"solo" | "duo">("solo");
-  const [partnerUsername, setPartnerUsername] = useState("");
+  const [partnerSearch, setPartnerSearch] = useState("");
   const [suggestions, setSuggestions] = useState<UserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [fortune, setFortune] = useState(0);
-  const [timeUntilTournament, setTimeUntilTournament] = useState("");
+  const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [showRulesDialog, setShowRulesDialog] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState({ hours: 0, minutes: 0, seconds: 0 });
   const [isLoading, setIsLoading] = useState(false);
+  const [fortune, setFortune] = useState(0);
 
+  // Charger les données du tournoi
   useEffect(() => {
     if (!user) return;
     loadTournamentData();
-    const interval = setInterval(updateTimeDisplay, 1000);
+    const interval = setInterval(loadTournamentData, 5000); // Refresh toutes les 5s
     return () => clearInterval(interval);
   }, [user]);
 
-  // Recherche de partenaires avec debounce
+  // Mettre à jour le temps restant
+  useEffect(() => {
+    const timer = setInterval(updateTimeDisplay, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Mettre à jour le round sélectionné selon le round actuel
+  useEffect(() => {
+    if (currentTournament?.currentRound) {
+      setSelectedRound(currentTournament.currentRound);
+    }
+  }, [currentTournament?.currentRound]);
+
+  // Recherche de partenaires
   useEffect(() => {
     const searchPartner = async () => {
-      if (partnerUsername.length < 2) {
+      if (partnerSearch.length < 2) {
         setSuggestions([]);
-        setShowSuggestions(false);
         return;
       }
 
       setIsSearching(true);
       try {
-        const results = await searchUsers(partnerUsername);
+        const results = await searchUsers(partnerSearch);
         const filteredResults = results.filter(u => u.id !== user?.uid);
         setSuggestions(filteredResults);
-        setShowSuggestions(filteredResults.length > 0);
       } catch (error) {
-        console.error("Erreur recherche partenaires:", error);
+        logger.error("Erreur recherche partenaires:", error);
         setSuggestions([]);
       } finally {
         setIsSearching(false);
@@ -112,39 +87,65 @@ const Tournament = () => {
 
     const timeoutId = setTimeout(searchPartner, 300);
     return () => clearTimeout(timeoutId);
-  }, [partnerUsername, user]);
+  }, [partnerSearch, user]);
 
   const loadTournamentData = async () => {
     if (!user) return;
 
     try {
+      // Charger la fortune
       const userRef = ref(database, `users/${user.uid}`);
       const userSnapshot = await get(userRef);
-
       if (userSnapshot.exists()) {
         setFortune(userSnapshot.val().fortune || 0);
       }
 
+      // Charger le tournoi
       const tournamentRef = ref(database, `tournaments/active`);
       const snapshot = await get(tournamentRef);
 
       if (snapshot.exists()) {
-        const tournament = snapshot.val() as Tournament;
+        const tournament = snapshot.val() as TournamentType;
+        
+        // ✅ CORRECTION: S'assurer que players est toujours un tableau
+        if (!tournament.players || !Array.isArray(tournament.players)) {
+          tournament.players = [];
+        }
+        
+        // ✅ CORRECTION: S'assurer que matches est toujours un objet
+        if (!tournament.matches || typeof tournament.matches !== 'object') {
+          tournament.matches = {};
+        }
+        
         setCurrentTournament(tournament);
 
         const registered = tournament.players.some((p) => p.userId === user.uid);
         setIsRegistered(registered);
+
+        // ✅ Distribuer les prix automatiquement si tournoi terminé et prix non distribués
+        if (
+          tournament.status === "completed" &&
+          !tournament.prizesDistributed &&
+          tournament.winners?.length > 0
+        ) {
+          logger.log("🏆 Tournoi terminé détecté, distribution des prix...");
+          setTimeout(async () => {
+            const result = await distributeTournamentPrizes("active");
+            if (result.success) {
+              toast({
+                title: "🏆 Prix distribués!",
+                description: result.message,
+              });
+              loadTournamentData();
+            }
+          }, 1000);
+        }
       } else {
         setCurrentTournament(null);
         setIsRegistered(false);
       }
     } catch (error) {
-      console.error("Erreur chargement tournoi:", error);
-      toast({
-        title: "Erreur",
-        description: "Impossible de charger les données du tournoi",
-        variant: "destructive",
-      });
+      logger.error("Erreur chargement tournoi:", error);
     }
   };
 
@@ -154,173 +155,18 @@ const Tournament = () => {
 
     if (currentHour >= TOURNAMENT_START && currentHour < TOURNAMENT_END) {
       const remaining = TOURNAMENT_END - currentHour;
-      const minutes = Math.floor(remaining * 60);
-      setTimeUntilTournament(`En cours - ${minutes} min restantes`);
+      const hours = Math.floor(remaining);
+      const minutes = Math.floor((remaining - hours) * 60);
+      const seconds = Math.floor(((remaining - hours) * 60 - minutes) * 60);
+      setTimeRemaining({ hours, minutes, seconds });
     } else if (currentHour < TOURNAMENT_START) {
       const until = TOURNAMENT_START - currentHour;
       const hours = Math.floor(until);
       const minutes = Math.floor((until - hours) * 60);
-      setTimeUntilTournament(`Débute dans ${hours}h ${minutes}min`);
+      const seconds = Math.floor(((until - hours) * 60 - minutes) * 60);
+      setTimeRemaining({ hours, minutes, seconds });
     } else {
-      setTimeUntilTournament("Terminé pour aujourd'hui");
-    }
-  };
-
-  const handleSelectPartner = (partner: UserProfile) => {
-    setPartnerUsername(partner.username);
-    setShowSuggestions(false);
-    setSuggestions([]);
-  };
-
-  const handleRegister = async () => {
-    if (!user || !userProfile) return;
-
-    const entryFee = playMode === "duo" ? ENTRY_FEE_DUO : ENTRY_FEE_SOLO;
-
-    if (fortune < entryFee) {
-      toast({
-        title: "Fonds insuffisants",
-        description: `Il vous faut ${entryFee}€ pour participer (vous avez ${fortune}€)`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    if (playMode === "duo" && !partnerUsername.trim()) {
-      toast({
-        title: "Partenaire requis",
-        description: "Entrez le nom de votre partenaire",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsLoading(true);
-
-    try {
-      let partnerId = undefined;
-      let partnerName = undefined;
-
-      if (playMode === "duo") {
-        const usersRef = ref(database, "users");
-        const usersSnapshot = await get(usersRef);
-
-        if (usersSnapshot.exists()) {
-          const users = usersSnapshot.val();
-          const partner = Object.entries(users).find(
-            ([_, data]: [string, any]) =>
-              data.username?.toLowerCase() === partnerUsername.toLowerCase()
-          );
-
-          if (!partner) {
-            toast({
-              title: "Partenaire introuvable",
-              description: "Aucun joueur avec ce nom",
-              variant: "destructive",
-            });
-            setIsLoading(false);
-            return;
-          }
-
-          partnerId = partner[0];
-          partnerName = (partner[1] as any).username;
-          const partnerFortune = (partner[1] as any).fortune || 0;
-
-          if (partnerFortune < ENTRY_FEE_DUO) {
-            toast({
-              title: "Partenaire sans fonds",
-              description: `${partnerName} n'a pas assez de fortune (${partnerFortune}€ / ${ENTRY_FEE_DUO}€)`,
-              variant: "destructive",
-            });
-            setIsLoading(false);
-            return;
-          }
-        }
-      }
-
-      const tournamentRef = ref(database, "tournaments/active");
-      const snapshot = await get(tournamentRef);
-
-      if (!snapshot.exists()) {
-        toast({
-          title: "Aucun tournoi actif",
-          description: "Un admin doit d'abord créer le tournoi depuis le panneau admin.",
-          variant: "destructive",
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      const tournament = snapshot.val() as Tournament;
-
-      const alreadyRegistered = tournament.players.some((p) => p.userId === user.uid);
-      if (alreadyRegistered) {
-        toast({
-          title: "Déjà inscrit",
-          description: "Vous êtes déjà inscrit à ce tournoi",
-          variant: "destructive",
-        });
-        setIsLoading(false);
-        return;
-      }
-
-      const newPlayer: TournamentPlayer = {
-        userId: user.uid,
-        username: userProfile.username,
-        eloRating: userProfile.eloRating || 1000,
-        partnerId,
-        partnerUsername: partnerName,
-      };
-
-      tournament.players.push(newPlayer);
-
-      let totalFees = entryFee;
-      if (playMode === "duo" && partnerId) {
-        totalFees += ENTRY_FEE_DUO;
-      }
-      tournament.prizePool += totalFees;
-
-      const updates: { [key: string]: any } = {};
-      updates[`users/${user.uid}/fortune`] = fortune - entryFee;
-
-      if (playMode === "duo" && partnerId) {
-        const partnerRef = ref(database, `users/${partnerId}`);
-        const partnerSnapshot = await get(partnerRef);
-        
-        if (partnerSnapshot.exists()) {
-          const partnerData = partnerSnapshot.val();
-          updates[`users/${partnerId}/fortune`] = (partnerData.fortune || 0) - ENTRY_FEE_DUO;
-        }
-      }
-
-      updates["tournaments/active/players"] = tournament.players;
-      updates["tournaments/active/prizePool"] = tournament.prizePool;
-
-      await update(ref(database), updates);
-
-      toast({
-        title: "Inscription réussie! 🎉",
-        description: `Vous êtes inscrit ${playMode === "duo" ? `en duo (${totalFees}€ total)` : `en solo (${entryFee}€)`}`,
-      });
-      await notifyTournamentStarting(
-  user.uid,
-  "Tournoi Quotidien",
-  "dans quelques instants"
-);
-
-      setShowRegisterDialog(false);
-      setPartnerUsername("");
-      setPlayMode("solo");
-      loadTournamentData();
-    } catch (error: any) {
-      console.error("Erreur inscription:", error);
-      toast({
-        title: "Erreur",
-        description: error.message || "Impossible de s'inscrire au tournoi",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
+      setTimeRemaining({ hours: 0, minutes: 0, seconds: 0 });
     }
   };
 
@@ -330,7 +176,218 @@ const Tournament = () => {
     return currentHour >= TOURNAMENT_START && currentHour < TOURNAMENT_END;
   };
 
-  // 🎯 FONCTION - Mettre à jour le score d'un match
+  // ✅ SOLUTION: Inscription duo avec système de token temporaire
+// Remplacer handleRegister dans Tournament.tsx
+
+  const handleRegister = async () => {
+  if (!user || !userProfile) return;
+
+  const entryFee = playMode === "duo" ? ENTRY_FEE_DUO : ENTRY_FEE_SOLO;
+
+  if (fortune < entryFee) {
+    toast({
+      title: "Fonds insuffisants",
+      description: `Il vous faut ${entryFee}€ pour participer (vous avez ${fortune}€)`,
+      variant: "destructive",
+    });
+    return;
+  }
+
+  if (playMode === "duo" && !partnerSearch.trim()) {
+    toast({
+      title: "Partenaire requis",
+      description: "Entrez le nom de votre partenaire",
+      variant: "destructive",
+    });
+    return;
+  }
+
+  setIsLoading(true);
+
+  try {
+    let partnerId: string | null = null;
+    let partnerName: string | null = null;
+    let partnerFortune = 0;
+
+    if (playMode === "duo") {
+      const usersRef = ref(database, "users");
+      const usersSnapshot = await get(usersRef);
+
+      if (usersSnapshot.exists()) {
+        const users = usersSnapshot.val();
+        const partner = Object.entries(users).find(
+          ([_, data]: [string, any]) =>
+            data.username?.toLowerCase() === partnerSearch.toLowerCase()
+        );
+
+        if (!partner) {
+          toast({
+            title: "Partenaire introuvable",
+            description: "Aucun joueur avec ce nom",
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+
+        partnerId = partner[0];
+        partnerName = (partner[1] as any).username;
+        partnerFortune = (partner[1] as any).fortune || 0;
+
+        if (partnerFortune < ENTRY_FEE_DUO) {
+          toast({
+            title: "Partenaire sans fonds",
+            description: `${partnerName} n'a pas assez de fortune (${partnerFortune}€ / ${ENTRY_FEE_DUO}€)`,
+            variant: "destructive",
+          });
+          setIsLoading(false);
+          return;
+        }
+      }
+    }
+
+    const tournamentRef = ref(database, "tournaments/active");
+    const snapshot = await get(tournamentRef);
+
+    if (!snapshot.exists()) {
+      toast({
+        title: "Aucun tournoi actif",
+        description: "Un admin doit d'abord créer le tournoi.",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    const tournament = snapshot.val() as TournamentType;
+
+    if (!tournament.players || !Array.isArray(tournament.players)) {
+      tournament.players = [];
+    }
+
+    const alreadyRegistered = tournament.players.some((p) => p.userId === user.uid);
+    if (alreadyRegistered) {
+      toast({
+        title: "Déjà inscrit",
+        description: "Vous êtes déjà inscrit à ce tournoi",
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    if (partnerId && tournament.players.some((p) => p.userId === partnerId)) {
+      toast({
+        title: "Partenaire déjà inscrit",
+        description: `${partnerName} est déjà inscrit au tournoi`,
+        variant: "destructive",
+      });
+      setIsLoading(false);
+      return;
+    }
+
+    const newPlayer: TournamentPlayer = {
+      userId: user.uid,
+      username: userProfile.username,
+      eloRating: userProfile.eloRating || 1000,
+      partnerId: partnerId || null,
+      partnerUsername: partnerName || null,
+    };
+
+    tournament.players.push(newPlayer);
+
+    let totalFees = entryFee;
+    if (playMode === "duo" && partnerId) {
+      totalFees += ENTRY_FEE_DUO;
+    }
+    tournament.prizePool += totalFees;
+
+    // ✅ ÉTAPE 1: Créer un token temporaire pour autoriser le débit du partenaire
+    const registrationId = `reg_${user.uid}_${Date.now()}`;
+    
+    if (playMode === "duo" && partnerId) {
+      await set(ref(database, `tournamentRegistrations/${registrationId}`), {
+        userId: user.uid,
+        partnerId: partnerId,
+        timestamp: Date.now(),
+      });
+    }
+
+    // ✅ ÉTAPE 2: Effectuer les mises à jour avec le token en place
+    const updates: { [key: string]: any } = {};
+    updates[`users/${user.uid}/fortune`] = fortune - entryFee;
+
+    if (playMode === "duo" && partnerId) {
+      updates[`users/${partnerId}/fortune`] = partnerFortune - ENTRY_FEE_DUO;
+    }
+
+    updates["tournaments/active/players"] = tournament.players;
+    updates["tournaments/active/prizePool"] = tournament.prizePool;
+
+    await update(ref(database), updates);
+
+    // ✅ ÉTAPE 3: Supprimer le token temporaire
+    if (playMode === "duo") {
+      await set(ref(database, `tournamentRegistrations/${registrationId}`), null);
+    }
+
+    // ✅ ÉTAPE 4: Enregistrer l'historique de fortune pour l'utilisateur principal
+    await addFortuneHistoryEntry(
+      user.uid,
+      -entryFee, // Montant négatif car c'est une dépense
+      "tournament_entry",
+      `Inscription tournoi ${playMode === "solo" ? "solo" : "duo"}`,
+      {
+        tournamentId: "active",
+        mode: playMode,
+        entryFee,
+        ...(playMode === "duo" && partnerId && { 
+          partnerId, 
+          partnerName 
+        })
+      }
+    );
+
+    // ✅ ÉTAPE 5: Enregistrer l'historique pour le partenaire en duo
+    if (playMode === "duo" && partnerId && partnerName) {
+      await addFortuneHistoryEntry(
+        partnerId,
+        -ENTRY_FEE_DUO,
+        "tournament_entry",
+        `Inscription tournoi duo`,
+        {
+          tournamentId: "active",
+          mode: "duo",
+          entryFee: ENTRY_FEE_DUO,
+          partnerId: user.uid,
+          partnerName: userProfile.username
+        }
+      );
+    }
+
+    toast({
+      title: "Inscription réussie! 🎉",
+      description: `Vous êtes inscrit ${playMode === "duo" ? `en duo (${totalFees}€ total)` : `en solo (${entryFee}€)`}`,
+    });
+
+    await notifyTournamentStarting(user.uid, "Tournoi Quotidien", "dans quelques instants");
+
+    setShowRegisterModal(false);
+    setPartnerSearch("");
+    setPlayMode("solo");
+    loadTournamentData();
+  } catch (error: any) {
+    logger.error("Erreur inscription:", error);
+    toast({
+      title: "Erreur",
+      description: error.message || "Impossible de s'inscrire au tournoi",
+      variant: "destructive",
+    });
+  } finally {
+    setIsLoading(false);
+  }
+};
+
   const updateMatchScore = async (matchId: string, team: 'team1' | 'team2', newScore: number) => {
     if (!currentTournament) return;
     
@@ -347,7 +404,7 @@ const Tournament = () => {
         description: `${team === 'team1' ? 'Équipe 1' : 'Équipe 2'}: ${newScore} points`,
       });
     } catch (error: any) {
-      console.error("Erreur mise à jour score:", error);
+      logger.error("Erreur mise à jour score:", error);
       toast({ 
         title: "Erreur", 
         description: error.message, 
@@ -356,217 +413,101 @@ const Tournament = () => {
     }
   };
 
-  // 🏁 FONCTION - Terminer un match
   const finishMatch = async (matchId: string) => {
-    if (!currentTournament) return;
+    if (!currentTournament || !userProfile) return;
     
     const match = currentTournament.matches[matchId];
     if (!match) return;
+
+    if (match.score1 === match.score2) {
+      toast({
+        title: "Score invalide",
+        description: "Le match ne peut pas se terminer par une égalité",
+        variant: "destructive",
+      });
+      return;
+    }
     
     if (!confirm(`✅ Terminer le match ${match.team1.playerNames[0]} vs ${match.team2.playerNames[0]} ?`)) return;
     
     try {
-      const winnerId = match.score1 > match.score2 
-        ? match.team1.playerIds[0] 
-        : match.team2.playerIds[0];
-
-      const updates: { [key: string]: any } = {};
-      updates[`tournaments/active/matches/${matchId}/status`] = 'completed';
-      updates[`tournaments/active/matches/${matchId}/winnerId`] = winnerId;
+      setIsLoading(true);
+      const result = await finishMatchSafe(matchId, user!.uid);
       
-      await update(ref(database), updates);
-      await loadTournamentData();
-      
-      toast({
-        title: "Match terminé! 🏁",
-        description: `Score final: ${match.score1} - ${match.score2}`,
-      });
-
-      // Vérifier si tous les matchs du round sont terminés
-      await checkRoundCompletion();
+      if (result.success) {
+        toast({
+          title: "Match terminé! 🏁",
+          description: `Score final: ${match.score1} - ${match.score2}`,
+        });
+        await loadTournamentData();
+        
+        // Vérifier si le round est terminé
+        const completion = await checkRoundCompletion();
+        if (completion.isComplete && completion.winnersCount > 1) {
+          setTimeout(() => {
+            if (confirm(`🎊 Round terminé! ${completion.winnersCount} gagnants. Créer le prochain round ?`)) {
+              createNextRound();
+            }
+          }, 1000);
+        } else if (completion.winnersCount === 1) {
+          toast({
+            title: "🏆 TOURNOI TERMINÉ!",
+            description: "Le vainqueur a été déterminé!",
+          });
+        }
+      } else {
+        toast({
+          title: "Erreur",
+          description: result.message,
+          variant: "destructive",
+        });
+      }
     } catch (error: any) {
-      console.error("Erreur fin de match:", error);
+      logger.error("Erreur fin de match:", error);
       toast({ 
         title: "Erreur", 
         description: error.message, 
         variant: "destructive" 
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // 🔄 FONCTION - Vérifier si le round est terminé et créer le suivant
-  const checkRoundCompletion = async () => {
-    if (!currentTournament) return;
-
-    const matches = Object.values(currentTournament.matches);
-    const currentRound = currentTournament.currentRound || 1;
-    
-    const currentRoundMatches = matches.filter((m: any) => m.round === currentRound);
-    const allCompleted = currentRoundMatches.every((m: any) => m.status === 'completed');
-
-    if (!allCompleted) return;
-
-    // Récupérer les gagnants du round actuel
-    const winners = currentRoundMatches
-      .map((m: any) => {
-        if (m.score1 > m.score2) {
-          return {
-            userId: m.team1.playerIds[0],
-            username: m.team1.playerNames[0],
-            partnerId: m.team1.partnerId,
-            partnerName: m.team1.partnerName,
-          };
-        } else {
-          return {
-            userId: m.team2.playerIds[0],
-            username: m.team2.playerNames[0],
-            partnerId: m.team2.partnerId,
-            partnerName: m.team2.partnerName,
-          };
-        }
-      });
-
-    // Si un seul gagnant, le tournoi est terminé
-    if (winners.length === 1) {
-      await finishTournament(winners[0].userId);
-      return;
-    }
-
-    // Sinon, créer le prochain round
-    toast({
-      title: "🎊 Round terminé!",
-      description: `${winners.length} gagnants passent au prochain round`,
-    });
-
-    setTimeout(() => {
-      createNextRound(winners);
-    }, 2000);
-  };
-
-  // ➡️ FONCTION - Créer le prochain round
-  const createNextRound = async (winners: any[]) => {
-    if (!currentTournament) return;
+  const createNextRound = async () => {
+    if (!user || !currentTournament) return;
 
     try {
-      const nextRound = (currentTournament.currentRound || 1) + 1;
-      const newMatches: { [key: string]: Match } = { ...currentTournament.matches };
+      setIsLoading(true);
+      const result = await createNextRoundSafe("active", user.uid);
 
-      // Mélanger les gagnants
-      for (let i = winners.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [winners[i], winners[j]] = [winners[j], winners[i]];
+      if (result.success) {
+        toast({
+          title: `🎮 Round ${result.newRound} créé!`,
+          description: result.message,
+        });
+        await loadTournamentData();
+      } else {
+        toast({
+          title: "Erreur",
+          description: result.message,
+          variant: "destructive",
+        });
       }
-
-      // Créer les nouveaux matchs
-      for (let i = 0; i < winners.length - 1; i += 2) {
-        const player1 = winners[i];
-        const player2 = winners[i + 1];
-
-        if (player1 && player2) {
-          const matchKey = `match_round${nextRound}_${i}`;
-          newMatches[matchKey] = {
-            id: matchKey,
-            round: nextRound,
-            team1: {
-              playerIds: [player1.userId],
-              playerNames: [player1.username],
-              partnerId: player1.partnerId || null,
-              partnerName: player1.partnerName || null,
-            },
-            team2: {
-              playerIds: [player2.userId],
-              playerNames: [player2.username],
-              partnerId: player2.partnerId || null,
-              partnerName: player2.partnerName || null,
-            },
-            status: "pending",
-            startTime: Date.now(),
-            score1: 0,
-            score2: 0,
-          };
-        }
-      }
-
-      const updates: { [key: string]: any } = {};
-      updates['tournaments/active/matches'] = newMatches;
-      updates['tournaments/active/currentRound'] = nextRound;
-
-      await update(ref(database), updates);
-      await loadTournamentData();
-
-      toast({
-        title: `🎮 Round ${nextRound} créé!`,
-        description: `${Math.floor(winners.length / 2)} nouveaux matchs`,
-      });
     } catch (error: any) {
-      console.error("Erreur création round:", error);
+      logger.error("Erreur création round:", error);
       toast({
         title: "Erreur",
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // 🏆 FONCTION - Terminer le tournoi et distribuer les récompenses
-  const finishTournament = async (winnerId: string) => {
-    if (!currentTournament) return;
-
-    try {
-      const winner = currentTournament.players.find(p => p.userId === winnerId);
-      if (!winner) return;
-
-      const prizePool = currentTournament.prizePool;
-      const firstPrize = Math.floor(prizePool * 0.5);
-
-      const updates: { [key: string]: any } = {};
-      
-      const winnerRef = ref(database, `users/${winnerId}`);
-      const winnerSnapshot = await get(winnerRef);
-      
-      if (winnerSnapshot.exists()) {
-        const currentFortune = winnerSnapshot.val().fortune || 0;
-        const newFortune = currentFortune + firstPrize;
-        updates[`users/${winnerId}/fortune`] = newFortune;
-
-        // Historique de fortune (gagnant tournoi)
-        await addFortuneHistoryEntry(
-          winnerId,
-          newFortune,
-          firstPrize,
-          "Récompense tournoi"
-        );
-        await notifyFortuneReceived(
-  winnerId,
-  firstPrize,
-  "Victoire du tournoi quotidien"
-);
-      }
-
-      updates['tournaments/active/status'] = 'completed';
-      updates['tournaments/active/winners'] = [winnerId];
-      updates['tournaments/active/isActive'] = false;
-
-      await update(ref(database), updates);
-      await loadTournamentData();
-
-      toast({
-        title: "🏆 TOURNOI TERMINÉ!",
-        description: `${winner.username} remporte ${firstPrize}€!`,
-      });
-    } catch (error: any) {
-      console.error("Erreur fin tournoi:", error);
-      toast({
-        title: "Erreur",
-        description: error.message,
-        variant: "destructive",
-      });
-    }
-  };
-
-  // 🎮 FONCTION - Lancer le tournoi
   const startTournament = async () => {
-    if (!currentTournament) {
+    if (!currentTournament || !user) {
       toast({ title: "Erreur", description: "Aucun tournoi actif", variant: "destructive" });
       return;
     }
@@ -583,13 +524,13 @@ const Tournament = () => {
       const players = [...currentTournament.players];
       const matchesArray = [];
       
-      // Mélanger les joueurs aléatoirement
+      // Mélanger les joueurs
       for (let i = players.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
         [players[i], players[j]] = [players[j], players[i]];
       }
       
-      // Créer les paires de matchs
+      // Créer les matchs
       for (let i = 0; i < players.length - 1; i += 2) {
         const player1 = players[i];
         const player2 = players[i + 1];
@@ -601,14 +542,14 @@ const Tournament = () => {
             team1: {
               playerIds: [player1.userId],
               playerNames: [player1.username],
-              partnerId: player1.partnerId || null,
-              partnerName: player1.partnerUsername || null,
+              partnerId: player1.partnerId ?? null,
+              partnerName: player1.partnerUsername ?? null,
             },
             team2: {
               playerIds: [player2.userId],
               playerNames: [player2.username],
-              partnerId: player2.partnerId || null,
-              partnerName: player2.partnerUsername || null,
+              partnerId: player2.partnerId ?? null,
+              partnerName: player2.partnerUsername ?? null,
             },
             status: "pending",
             startTime: Date.now(),
@@ -616,16 +557,6 @@ const Tournament = () => {
             score2: 0,
           });
         }
-      }
-      
-      if (matchesArray.length === 0) {
-        toast({ 
-          title: "Erreur", 
-          description: "Impossible de créer les matchs", 
-          variant: "destructive" 
-        });
-        setIsLoading(false);
-        return;
       }
       
       const matchesObject: { [key: string]: any } = {};
@@ -647,20 +578,19 @@ const Tournament = () => {
       
       await loadTournamentData();
     } catch (error: any) {
-      console.error("Erreur lancement tournoi:", error);
+      logger.error("Erreur lancement tournoi:", error);
       toast({ title: "Erreur", description: error.message, variant: "destructive" });
     } finally {
       setIsLoading(false);
     }
   };
 
-
   // Grouper les matchs par round
   const getMatchesByRound = () => {
     if (!currentTournament?.matches) return {};
     
-    const matchesByRound: { [key: number]: Match[] } = {};
-    Object.values(currentTournament.matches).forEach((match: any) => {
+    const matchesByRound: { [key: number]: TournamentMatch[] } = {};
+    Object.values(currentTournament.matches).forEach((match) => {
       if (!matchesByRound[match.round]) {
         matchesByRound[match.round] = [];
       }
@@ -670,503 +600,1032 @@ const Tournament = () => {
     return matchesByRound;
   };
 
-  return (
-    <AppLayout>
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-        <div className="mb-6 text-center">
-          <motion.div
-            animate={{ scale: [1, 1.1, 1] }}
-            transition={{ duration: 2, repeat: Infinity }}
-            className="mb-4 text-6xl"
-          >
-            🏆
-          </motion.div>
-          <h1 className="text-3xl font-bold mb-2">Tournoi Quotidien</h1>
-          <p className="text-muted-foreground">{timeUntilTournament}</p>
-          
-          {currentTournament?.status && (
-            <Badge className="mt-2" variant={currentTournament.status === 'completed' ? 'default' : 'secondary'}>
-              {currentTournament.status === 'in_progress' ? '🎮 En cours' : 
-               currentTournament.status === 'completed' ? '✅ Terminé' : '⏳ En attente'}
-            </Badge>
-          )}
-          
+  // Calculer le classement en temps réel
+  const getLeaderboard = () => {
+    if (!currentTournament) return [];
+    
+    // ✅ CORRECTION: Vérifier que players existe et est un tableau
+    if (!currentTournament.players || !Array.isArray(currentTournament.players)) {
+      return [];
+    }
+
+    const playerStats: { [key: string]: { name: string; wins: number; elo: number } } = {};
+
+    // Initialiser tous les joueurs
+    currentTournament.players.forEach(player => {
+      playerStats[player.userId] = {
+        name: player.username + (player.partnerUsername ? ` & ${player.partnerUsername}` : ''),
+        wins: 0,
+        elo: player.eloRating,
+      };
+    });
+
+    // Compter les victoires
+    if (currentTournament.matches && typeof currentTournament.matches === 'object') {
+      Object.values(currentTournament.matches).forEach((match) => {
+        if (match.status === 'completed' && match.winnerId) {
+          if (playerStats[match.winnerId]) {
+            playerStats[match.winnerId].wins++;
+          }
+        }
+      });
+    }
+
+    // Trier par victoires puis ELO
+    const sorted = Object.entries(playerStats)
+      .map(([id, stats]) => ({ ...stats, id }))
+      .sort((a, b) => {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return b.elo - a.elo;
+      })
+      .slice(0, 10);
+
+    // Ajouter les gains potentiels
+    return sorted.map((player, index) => ({
+      ...player,
+      rank: index + 1,
+      prize: index === 0 ? Math.floor(currentTournament.prizePool * 0.5) :
+             index === 1 ? Math.floor(currentTournament.prizePool * 0.3) :
+             index === 2 ? Math.floor(currentTournament.prizePool * 0.2) : 0,
+    }));
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "completed": return "bg-green-500/10 text-green-500 border-green-500/30";
+      case "in_progress": return "bg-blue-500/10 text-blue-500 border-blue-500/30";
+      case "pending": return "bg-gray-500/10 text-gray-400 border-gray-500/30";
+      default: return "bg-gray-500/10 text-gray-400 border-gray-500/30";
+    }
+  };
+
+  const MatchCard = ({ match, matchKey }: { match: TournamentMatch; matchKey: string }) => {
+    const isAdmin = userProfile && (userProfile.role === "admin" || userProfile.role === "agent");
+    
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-4 border border-slate-700 hover:border-blue-500/50 transition-all"
+      >
+        <div className="flex items-center justify-between mb-3">
+          <span className={`px-3 py-1 rounded-full text-xs font-semibold border ${getStatusColor(match.status)}`}>
+            {match.status === "completed" ? "✅ Terminé" : 
+             match.status === "in_progress" ? "🎮 En cours" : "⏳ À venir"}
+          </span>
+          <span className="text-xs text-slate-400">Round {match.round}</span>
         </div>
 
-        <Card className="mb-6 border-primary/50">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Clock className="h-5 w-5 text-primary" />
-              Informations du Tournoi
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Horaires</span>
-              <span className="font-bold">13h00 - 14h15</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Durée des matchs</span>
-              <span className="font-bold">{MATCH_DURATION} minutes</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Frais d'inscription</span>
-              <span className="font-bold text-primary">50€ solo / 25€ duo</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Cagnotte</span>
-              <span className="font-bold text-yellow-500">{currentTournament?.prizePool || 0}€</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Joueurs inscrits</span>
-              <span className="font-bold">{currentTournament?.players.length || 0}</span>
-            </div>
-            {currentTournament?.currentRound && currentTournament.currentRound > 0 && (
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Round actuel</span>
-                <span className="font-bold text-primary">Round {currentTournament.currentRound}</span>
+        <div className="space-y-3">
+          {/* Team 1 */}
+          <div className={`flex items-center justify-between p-3 rounded-lg ${
+            match.winnerId === match.team1.playerIds[0] ? "bg-blue-500/20 border border-blue-500/50" : "bg-slate-800/50"
+          }`}>
+            <div className="flex items-center gap-3 flex-1">
+              <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-lg font-bold ${
+                match.winnerId === match.team1.playerIds[0] ? "ring-2 ring-blue-500" : ""
+              }`}>
+                {match.team1.playerNames[0][0]}
               </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {!isRegistered && currentTournament?.status !== 'in_progress' && currentTournament?.status !== 'completed' ? (
-          <Card className="mb-6">
-            <CardContent className="p-6 text-center">
-              <Trophy className="h-16 w-16 mx-auto mb-4 text-yellow-500" />
-              <h3 className="text-xl font-bold mb-2">Rejoindre le tournoi</h3>
-              <p className="text-muted-foreground mb-4">Participez seul ou en duo au tournoi quotidien</p>
-              <div className="flex gap-3 justify-center mb-4">
-                <Button onClick={() => setShowRulesDialog(true)} variant="outline">
-                  Voir les règles
-                </Button>
-                <Button
-                  onClick={() => setShowRegisterDialog(true)}
-                  variant="default"
-                  className="bg-primary hover:bg-primary/90"
-                  disabled={!isTournamentTime() || isLoading}
-                >
-                  {isLoading ? (
-                    <>
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      Inscription...
-                    </>
-                  ) : (
-                    "S'inscrire"
-                  )}
-                </Button>
-              </div>
-              {!isTournamentTime() && (
-                <p className="text-xs text-muted-foreground">
-                  ⏰ Le tournoi est disponible de 13h à 14h15
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-white truncate">
+                  {match.team1.playerNames[0]}
+                  {match.team1.partnerName && ` & ${match.team1.partnerName}`}
                 </p>
-              )}
-            </CardContent>
-          </Card>
-        ) : isRegistered ? (
-          <Card className="mb-6 border-primary">
-            <CardContent className="p-6 text-center">
-              <Star className="h-16 w-16 mx-auto mb-4 text-primary" />
-              <h3 className="text-xl font-bold mb-2">Vous êtes inscrit! ✅</h3>
-              <p className="text-muted-foreground">Bonne chance pour le tournoi</p>
-            </CardContent>
-          </Card>
-        ) : null}
-
-        {currentTournament && currentTournament.players.length > 0 && (
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle>Participants ({currentTournament.players.length})</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {currentTournament.players.map((player, index) => (
-                  <div
-                    key={player.userId}
-                    className={`flex items-center justify-between p-3 rounded-lg transition-colors ${
-                      player.userId === user?.uid
-                        ? "bg-primary/20 border border-primary/50"
-                        : "bg-surface-alt"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <Badge variant="outline">#{index + 1}</Badge>
-                      <div>
-                        <p className="font-medium">{player.username}</p>
-                        {player.partnerUsername && (
-                          <p className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Users className="h-3 w-3" />
-                            avec {player.partnerUsername}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Zap className="h-4 w-4 text-primary" />
-                      <span className="font-bold">{player.eloRating}</span>
-                    </div>
-                  </div>
-                ))}
               </div>
-            </CardContent>
-          </Card>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {isAdmin && match.status !== "completed" && (
+                <>
+                  <button
+                    onClick={() => updateMatchScore(matchKey, 'team1', Math.max(0, match.score1 - 1))}
+                    disabled={match.score1 <= 0 || isLoading}
+                    className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    -
+                  </button>
+                  <span className="text-2xl font-bold w-12 text-center">{match.score1}</span>
+                  <button
+                    onClick={() => updateMatchScore(matchKey, 'team1', match.score1 + 1)}
+                    disabled={isLoading}
+                    className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold"
+                  >
+                    +
+                  </button>
+                </>
+              )}
+              {match.status === "completed" && (
+                <span className={`text-3xl font-bold ${match.winnerId === match.team1.playerIds[0] ? 'text-blue-400' : 'text-slate-600'}`}>
+                  {match.score1}
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="text-center text-slate-500 font-bold text-sm">VS</div>
+
+          {/* Team 2 */}
+          <div className={`flex items-center justify-between p-3 rounded-lg ${
+            match.winnerId === match.team2.playerIds[0] ? "bg-blue-500/20 border border-blue-500/50" : "bg-slate-800/50"
+          }`}>
+            <div className="flex items-center gap-3 flex-1">
+              <div className={`w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-lg font-bold ${
+                match.winnerId === match.team2.playerIds[0] ? "ring-2 ring-blue-500" : ""
+              }`}>
+                {match.team2.playerNames[0][0]}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-white truncate">
+                  {match.team2.playerNames[0]}
+                  {match.team2.partnerName && ` & ${match.team2.partnerName}`}
+                </p>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              {isAdmin && match.status !== "completed" && (
+                <>
+                  <button
+                    onClick={() => updateMatchScore(matchKey, 'team2', Math.max(0, match.score2 - 1))}
+                    disabled={match.score2 <= 0 || isLoading}
+                    className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    -
+                  </button>
+                  <span className="text-2xl font-bold w-12 text-center">{match.score2}</span>
+                  <button
+                    onClick={() => updateMatchScore(matchKey, 'team2', match.score2 + 1)}
+                    disabled={isLoading}
+                    className="w-8 h-8 bg-slate-700 hover:bg-slate-600 rounded-lg font-bold"
+                  >
+                    +
+                  </button>
+                </>
+              )}
+              {match.status === "completed" && (
+                <span className={`text-3xl font-bold ${match.winnerId === match.team2.playerIds[0] ? 'text-blue-400' : 'text-slate-600'}`}>
+                  {match.score2}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {isAdmin && match.status !== "completed" && (
+          <button
+            onClick={() => finishMatch(matchKey)}
+            disabled={isLoading}
+            className="w-full mt-3 px-4 py-2 bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700 rounded-lg font-semibold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isLoading ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : "🏁 Terminer le match"}
+          </button>
         )}
 
-        {/* AFFICHAGE DES MATCHS PAR ROUND */}
-        {currentTournament && currentTournament.matches && Object.keys(currentTournament.matches).length > 0 && (
-          <div className="space-y-6">
-            {Object.entries(getMatchesByRound())
-              .sort(([a], [b]) => Number(b) - Number(a))
-              .map(([roundNum, matches]) => (
-                <Card key={roundNum}>
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2">
-                      🎮 Round {roundNum}
-                      <Badge variant="secondary">{matches.length} match{matches.length > 1 ? 's' : ''}</Badge>
-                      {Number(roundNum) === currentTournament.currentRound && (
-                        <Badge variant="default" className="ml-2">En cours</Badge>
-                      )}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="space-y-4">
-                      {matches.map((match: Match, index: number) => {
-                        const matchId = Object.keys(currentTournament.matches).find(
-                          key => currentTournament.matches[key].id === match.id
-                        );
-                        
-                        return (
-                          <div
-                            key={match.id}
-                            className="p-4 rounded-lg bg-surface-alt border border-border"
-                          >
-                            <div className="flex items-center justify-between mb-3">
-                              <Badge variant="outline">Match #{index + 1}</Badge>
-                              <Badge 
-                                variant={
-                                  match.status === "completed" ? "default" :
-                                  match.status === "in_progress" ? "secondary" : 
-                                  "outline"
-                                }
-                              >
-                                {match.status === "completed" ? "✅ Terminé" :
-                                 match.status === "in_progress" ? "🎮 En cours" : 
-                                 "⏳ En attente"}
-                              </Badge>
-                            </div>
-                            
-                            <div className="space-y-3">
-                              {/* ÉQUIPE 1 */}
-                              <div className="flex items-center justify-between p-3 rounded bg-surface border border-border">
-                                <div className="flex-1">
-                                  <p className="font-bold text-foreground">
-                                    {match.team1.playerNames.join(" & ")}
-                                    {match.team1.partnerName && ` & ${match.team1.partnerName}`}
-                                  </p>
-                                </div>
-                                
-                              <div className="flex items-center gap-2">
-                                  {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
-                                  <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => updateMatchScore(matchId, 'team1', Math.max(0, match.score1 - 1))}
-                                        disabled={match.score1 <= 0}
-                                      >
-                                        -
-                                      </Button>
-                                      <span className="text-2xl font-bold w-12 text-center">{match.score1}</span>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => updateMatchScore(matchId, 'team1', match.score1 + 1)}
-                                      >
-                                        +
-                                      </Button>
-                                    </>
-                                  )}
-                                  {match.status === "completed" && (
-                                    <span className={`text-3xl font-bold ${match.winnerId === match.team1.playerIds[0] ? 'text-primary' : 'text-muted-foreground'}`}>
-                                      {match.score1}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              <div className="text-center text-muted-foreground font-bold">VS</div>
-
-                              {/* ÉQUIPE 2 */}
-                              <div className="flex items-center justify-between p-3 rounded bg-surface border border-border">
-                                <div className="flex-1">
-                                  <p className="font-bold text-foreground">
-                                    {match.team2.playerNames.join(" & ")}
-                                    {match.team2.partnerName && ` & ${match.team2.partnerName}`}
-                                  </p>
-                                </div>
-                                
-                                <div className="flex items-center gap-2">
-                                  {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
-                                    <>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => updateMatchScore(matchId, 'team2', Math.max(0, match.score2 - 1))}
-                                        disabled={match.score2 <= 0}
-                                      >
-                                        -
-                                      </Button>
-                                      <span className="text-2xl font-bold w-12 text-center">{match.score2}</span>
-                                      <Button
-                                        size="sm"
-                                        variant="outline"
-                                        onClick={() => updateMatchScore(matchId, 'team2', match.score2 + 1)}
-                                      >
-                                        +
-                                      </Button>
-                                    </>
-                                  )}
-                                  {match.status === "completed" && (
-                                    <span className={`text-3xl font-bold ${match.winnerId === match.team2.playerIds[0] ? 'text-primary' : 'text-muted-foreground'}`}>
-                                      {match.score2}
-                                    </span>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* BOUTON TERMINER LE MATCH */}
-                              {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && match.status !== "completed" && matchId && (
-                                <Button
-                                  onClick={() => finishMatch(matchId)}
-                                  className="w-full"
-                                  variant="default"
-                                >
-                                  🏁 Terminer le match
-                                </Button>
-                              )}
-
-                              {/* INDICATEUR DE VICTOIRE */}
-                              {match.status === "completed" && (
-                                <div className="text-center p-2 bg-primary/10 rounded">
-                                  <p className="text-sm font-bold text-primary">
-                                    🏆 Vainqueur: {match.winnerId === match.team1.playerIds[0] ? match.team1.playerNames[0] : match.team2.playerNames[0]}
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+        {match.status === "completed" && match.winnerId && (
+          <div className="mt-3 text-center p-2 bg-gradient-to-r from-blue-500/20 to-purple-500/20 rounded-lg">
+            <p className="text-sm font-semibold text-blue-400 flex items-center justify-center gap-2">
+              <Trophy className="h-4 w-4" />
+              {match.winnerId === match.team1.playerIds[0] ? match.team1.playerNames[0] : match.team2.playerNames[0]} remporte le match !
+            </p>
           </div>
         )}
+      </motion.div>
+    );
+  };
 
-        {/* AFFICHAGE DU GAGNANT */}
-        {currentTournament?.status === 'completed' && currentTournament.winners.length > 0 && (
-          <Card className="mb-6 border-yellow-500 bg-gradient-to-br from-yellow-500/10 to-transparent">
-            <CardContent className="p-6 text-center">
-              <motion.div
-                animate={{ rotate: [0, 10, -10, 0] }}
-                transition={{ duration: 1, repeat: Infinity }}
-                className="text-6xl mb-4"
-              >
-                🏆
-              </motion.div>
-              <h3 className="text-2xl font-bold mb-2">
-                Tournoi terminé!
-              </h3>
-              <p className="text-lg text-muted-foreground mb-4">
-                Félicitations au gagnant! 🎉
+  const leaderboard = getLeaderboard();
+  const matchesByRound = getMatchesByRound();
+  const totalRounds = Object.keys(matchesByRound).length;
+
+  return (
+    <AppLayout>
+      <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950 text-white p-6">
+        <div className="max-w-7xl mx-auto">
+          {/* Header */}
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="text-center mb-8"
+          >
+            <motion.div
+              animate={{ scale: [1, 1.1, 1], rotate: [0, 5, -5, 0] }}
+              transition={{ duration: 3, repeat: Infinity }}
+              className="text-8xl mb-4"
+            >
+              🏆
+            </motion.div>
+            <h1 className="text-5xl font-bold mb-2 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+              Tournoi Quotidien
+            </h1>
+            <p className="text-slate-400 text-lg">{new Date().toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            {currentTournament?.status && (
+              <div className="mt-3">
+                <span className={`px-4 py-2 rounded-full text-sm font-semibold border ${
+                  currentTournament.status === 'completed' ? 'bg-green-500/10 text-green-500 border-green-500/30' :
+                  currentTournament.status === 'in_progress' ? 'bg-blue-500/10 text-blue-500 border-blue-500/30' :
+                  'bg-gray-500/10 text-gray-400 border-gray-500/30'
+                }`}>
+                  {currentTournament.status === 'in_progress' ? '🎮 En cours' : 
+                   currentTournament.status === 'completed' ? '✅ Terminé' : '⏳ En attente'}
+                </span>
+              </div>
+            )}
+          </motion.div>
+
+          {/* Stats rapides */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+              className="bg-gradient-to-br from-blue-500/10 to-blue-600/10 rounded-xl p-6 border border-blue-500/20"
+            >
+              <Clock className="h-8 w-8 text-blue-400 mb-3" />
+              <p className="text-3xl font-bold text-white mb-1">
+                {String(timeRemaining.hours).padStart(2, '0')}:{String(timeRemaining.minutes).padStart(2, '0')}:{String(timeRemaining.seconds).padStart(2, '0')}
               </p>
-              <div className="text-3xl font-bold text-yellow-500">
-                {Math.floor(currentTournament.prizePool * 0.5)}€
-              </div>
-              <p className="text-sm text-muted-foreground mt-2">Gain du vainqueur</p>
-            </CardContent>
-          </Card>
-        )}
+              <p className="text-sm text-slate-400">Temps restant</p>
+            </motion.div>
 
-        <Dialog open={showRulesDialog} onOpenChange={setShowRulesDialog}>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <AlertCircle className="h-5 w-5 text-primary" />
-                Règles du Tournoi
-              </DialogTitle>
-              <DialogDescription>Consultez les règles et le format du tournoi.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <h3 className="font-bold mb-2">⏰ Horaires</h3>
-                <p className="text-sm text-muted-foreground">
-                  Le tournoi se déroule tous les jours de <strong>13h00 à 14h15</strong> (1h15 de
-                  compétition)
-                </p>
-              </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.2 }}
+              className="bg-gradient-to-br from-purple-500/10 to-purple-600/10 rounded-xl p-6 border border-purple-500/20"
+            >
+              <Users className="h-8 w-8 text-purple-400 mb-3" />
+              <p className="text-3xl font-bold text-white mb-1">{currentTournament?.players.length || 0}</p>
+              <p className="text-sm text-slate-400">Participants</p>
+            </motion.div>
 
-              <div>
-                <h3 className="font-bold mb-2">👥 Modes de jeu</h3>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• <strong>Solo :</strong> Affrontez les autres joueurs individuellement</li>
-                  <li>• <strong>Duo :</strong> Formez une équipe avec un partenaire</li>
-                </ul>
-              </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              className="bg-gradient-to-br from-yellow-500/10 to-yellow-600/10 rounded-xl p-6 border border-yellow-500/20"
+            >
+              <Trophy className="h-8 w-8 text-yellow-400 mb-3" />
+              <p className="text-3xl font-bold text-white mb-1">{currentTournament?.prizePool || 0}€</p>
+              <p className="text-sm text-slate-400">Cagnotte totale</p>
+            </motion.div>
 
-              <div>
-                <h3 className="font-bold mb-2">🎮 Déroulement</h3>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Chaque match dure exactement <strong>5 minutes</strong></li>
-                  <li>• Les matchs sont organisés en <strong>élimination directe</strong></li>
-                  <li>• Le gagnant de chaque match passe au round suivant</li>
-                  <li>• Le tournoi continue jusqu'à ce qu'il ne reste qu'un seul vainqueur</li>
-                </ul>
-              </div>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="bg-gradient-to-br from-pink-500/10 to-pink-600/10 rounded-xl p-6 border border-pink-500/20"
+            >
+              <TrendingUp className="h-8 w-8 text-pink-400 mb-3" />
+              <p className="text-3xl font-bold text-white mb-1">
+                Round {currentTournament?.currentRound || 0}/{totalRounds || 0}
+              </p>
+              <p className="text-sm text-slate-400">Progression</p>
+            </motion.div>
+          </div>
 
-              <div>
-                <h3 className="font-bold mb-2">💰 Récompenses</h3>
-                <ul className="text-sm text-muted-foreground space-y-1">
-                  <li>• Frais d'inscription : <strong>50€ en solo</strong> ou <strong>25€ par personne en duo</strong></li>
-                  <li>• La cagnotte totale est redistribuée aux gagnants</li>
-                  <li>• 🥇 1er : 50% de la cagnotte</li>
-                  <li>• 🥈 2ème : 30% de la cagnotte</li>
-                  <li>• 🥉 3ème : 20% de la cagnotte</li>
-                </ul>
-              </div>
+          {/* Navigation */}
+          <div className="grid grid-cols-3 gap-2 mb-6 bg-slate-900/50 p-2 rounded-xl border border-slate-800">
+  {[
+    { view: "overview", icon: "📊", label: "Vue" },
+    { view: "matches", icon: "🎮", label: "Matchs" },
+    { view: "leaderboard", icon: "🏅", label: "Classement" }
+  ].map(({ view, icon, label }) => (
+    <button
+      key={view}
+      onClick={() => setCurrentView(view as any)}
+      className={`py-3 px-2 rounded-lg font-semibold transition-all ${
+        currentView === view
+          ? "bg-blue-500 text-white shadow-lg shadow-blue-500/50"
+          : "bg-transparent text-slate-400 hover:text-white hover:bg-slate-800"
+      }`}
+    >
+      <span className="hidden sm:inline">{icon} {label}</span>
+      <span className="sm:hidden text-xl">{icon}</span>
+    </button>
+  ))}
+</div>
 
-              <div>
-                <h3 className="font-bold mb-2">🎁 Bonus</h3>
-                <p className="text-sm text-muted-foreground">
-                  Les bonus de club sont actifs pendant le tournoi !
-                </p>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
+          {/* Contenu selon la vue */}
+          <AnimatePresence mode="wait">
+            {currentView === "overview" && (
+              <motion.div
+                key="overview"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="space-y-6"
+              >
+                {/* Bannière d'inscription */}
+                {!isRegistered && currentTournament?.status !== 'in_progress' && currentTournament?.status !== 'completed' && currentTournament && (
+  <motion.div
+    initial={{ opacity: 0, scale: 0.95 }}
+    animate={{ opacity: 1, scale: 1 }}
+    className="bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 rounded-2xl p-6 sm:p-8 border border-white/10 relative overflow-hidden"
+  >
+    <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImdyaWQiIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAxMCAwIEwgMCAwIDAgMTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS1vcGFjaXR5PSIwLjA1IiBzdHJva2Utd2lkdGg9IjEiLz48L3BhdHRlcm4+PC9kZWZzPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbGw9InVybCgjZ3JpZCkiLz48L3N2Zz4=')] opacity-30"></div>
+    <div className="relative">
+      <Sparkles className="h-10 w-10 sm:h-12 sm:w-12 text-white mb-3 sm:mb-4" />
+      <h2 className="text-2xl sm:text-3xl font-bold text-white mb-2">Rejoignez le tournoi !</h2>
+      <p className="text-white/90 mb-4 sm:mb-6 text-base sm:text-lg">
+        Participez seul ou en duo et tentez de remporter la cagnotte de {currentTournament?.prizePool || 0}€
+      </p>
+      <div className="flex flex-col sm:flex-row gap-3">
+        <button
+          onClick={() => setShowRegisterModal(true)}
+          disabled={isLoading}
+          className="w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-white text-purple-600 rounded-xl font-bold hover:scale-105 transition-transform shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isLoading ? "Chargement..." : "S'inscrire maintenant"}
+        </button>
+        <button 
+          onClick={() => setShowRulesDialog(true)}
+          className="w-full sm:w-auto px-6 sm:px-8 py-3 sm:py-4 bg-white/10 backdrop-blur-sm text-white rounded-xl font-bold hover:bg-white/20 transition-all border border-white/20"
+        >
+          Voir les règles
+        </button>
+      </div>
+    </div>
+  </motion.div>
+)}
 
-        <Dialog open={showRegisterDialog} onOpenChange={setShowRegisterDialog}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Inscription au Tournoi</DialogTitle>
-              <DialogDescription>Choisissez votre mode de jeu et inscrivez-vous au tournoi.</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm text-muted-foreground mb-3">
-                  Votre fortune : <span className="font-bold text-foreground">{fortune}€</span>
-                </p>
-                <p className="text-sm text-muted-foreground mb-4">
-                  Frais d'inscription : <span className="font-bold text-primary">{playMode === "duo" ? ENTRY_FEE_DUO : ENTRY_FEE_SOLO}€</span>
-                </p>
-                {fortune < (playMode === "duo" ? ENTRY_FEE_DUO : ENTRY_FEE_SOLO) && (
-                  <p className="text-xs text-destructive mb-4">
-                    ⚠️ Vous n'avez pas assez de fortune pour participer
-                  </p>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <Button
-                  variant={playMode === "solo" ? "default" : "outline"}
-                  onClick={() => setPlayMode("solo")}
-                  className="h-20"
-                >
-                  <div className="text-center">
-                    <Trophy className="h-6 w-6 mx-auto mb-1" />
-                    <p className="font-bold">Solo</p>
-                    <p className="text-xs text-muted-foreground">50€</p>
-                  </div>
-                </Button>
-                <Button
-                  variant={playMode === "duo" ? "default" : "outline"}
-                  onClick={() => setPlayMode("duo")}
-                  className="h-20"
-                >
-                  <div className="text-center">
-                    <Users className="h-6 w-6 mx-auto mb-1" />
-                    <p className="font-bold">Duo</p>
-                    <p className="text-xs text-muted-foreground">25€</p>
-                  </div>
-                </Button>
-              </div>
-
-              {playMode === "duo" && (
-                <div className="relative">
-                  <label className="text-sm font-medium mb-2 block">Nom du partenaire</label>
-                  <div className="relative">
-                    <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                    {isSearching && (
-                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-muted-foreground z-10" />
-                    )}
-                    <input
-                      type="text"
-                      value={partnerUsername}
-                      onChange={(e) => setPartnerUsername(e.target.value)}
-                      onFocus={() => partnerUsername.length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
-                      placeholder="Tapez au moins 2 lettres..."
-                      className="w-full pl-10 pr-4 py-2 bg-surface border border-border rounded-lg text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  
-                  <AnimatePresence>
-                    {showSuggestions && suggestions.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        exit={{ opacity: 0, y: -10 }}
-                        className="absolute z-50 w-full mt-1 bg-surface border border-border rounded-lg shadow-lg max-h-60 overflow-y-auto"
+                {/* Message si pas de tournoi actif */}
+                {!currentTournament && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-gradient-to-r from-orange-600 via-red-600 to-orange-600 rounded-2xl p-8 border border-orange-500/30 text-center"
+                  >
+                    <AlertCircle className="h-16 w-16 mx-auto mb-4 text-white" />
+                    <h2 className="text-2xl font-bold text-white mb-2">Aucun tournoi actif</h2>
+                    <p className="text-white/90 mb-4">
+                      Un administrateur doit créer le tournoi du jour depuis le panneau admin.
+                    </p>
+                    {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && (
+                      <button
+                        onClick={async () => {
+                          if (!user) return;
+                          try {
+                            setIsLoading(true);
+                            const newTournament = {
+                              id: "active",
+                              startTime: Date.now(),
+                              endTime: 0,
+                              isActive: true,
+                              players: [],
+                              matches: {},
+                              winners: [],
+                              prizePool: 0,
+                              status: "waiting",
+                              currentRound: 0,
+                              organizerId: user.uid,
+                            };
+                            await set(ref(database, "tournaments/active"), newTournament);
+                            toast({
+                              title: "Tournoi créé ! 🎮",
+                              description: "Les joueurs peuvent maintenant s'inscrire",
+                            });
+                            await loadTournamentData();
+                          } catch (error: any) {
+                            toast({
+                              title: "Erreur",
+                              description: error.message,
+                              variant: "destructive",
+                            });
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        }}
+                        disabled={isLoading}
+                        className="px-8 py-4 bg-white text-orange-600 rounded-xl font-bold hover:scale-105 transition-transform disabled:opacity-50"
                       >
-                        {suggestions.map((partner) => (
-                          <button
-                            key={partner.id}
-                            onClick={() => handleSelectPartner(partner)}
-                            className="w-full px-4 py-3 text-left hover:bg-surface-alt transition-colors flex items-center justify-between group"
-                          >
-                            <div>
-                              <p className="font-medium text-foreground group-hover:text-primary">
-                                {partner.username}
-                              </p>
-                              <p className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
+                        {isLoading ? (
+                          <span className="flex items-center justify-center gap-2">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            Création...
+                          </span>
+                        ) : (
+                          "Créer le tournoi"
+                        )}
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+
+                {isRegistered && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-gradient-to-r from-green-600 via-green-700 to-green-600 rounded-2xl p-8 border border-green-500/30"
+                  >
+                    <div className="text-center">
+                      <CheckCircle2 className="h-16 w-16 mx-auto mb-4 text-white" />
+                      <h2 className="text-3xl font-bold text-white mb-2">Vous êtes inscrit ! ✅</h2>
+                      <p className="text-white/90 text-lg">Bonne chance pour le tournoi</p>
+                    </div>
+                  </motion.div>
+                )}
+
+                {/* Bouton admin pour lancer le tournoi */}
+                {userProfile && (userProfile.role === "admin" || userProfile.role === "agent") && 
+                 currentTournament && currentTournament.status === "waiting" && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="bg-gradient-to-r from-orange-600 via-red-600 to-orange-600 rounded-2xl p-6 border border-orange-500/30"
+                  >
+                    <h3 className="text-xl font-bold text-white mb-4">🎮 Panel Organisateur</h3>
+                    <button
+                      onClick={startTournament}
+                      disabled={isLoading || (currentTournament?.players.length || 0) < 2}
+                      className="w-full px-6 py-3 bg-white text-orange-600 rounded-xl font-bold hover:scale-105 transition-transform disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoading ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          Lancement...
+                        </span>
+                      ) : (
+                        `Lancer le tournoi (${currentTournament?.players.length || 0} joueurs)`
+                      )}
+                    </button>
+                  </motion.div>
+                )}
+
+                {/* Informations du tournoi */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-6 border border-slate-700">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                      <Calendar className="h-5 w-5 text-blue-400" />
+                      Informations
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
+                        <span className="text-slate-400">Horaires</span>
+                        <span className="font-semibold">13h00 - 14h15</span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
+                        <span className="text-slate-400">Durée des matchs</span>
+                        <span className="font-semibold">5 minutes</span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
+                        <span className="text-slate-400">Format</span>
+                        <span className="font-semibold">Élimination directe</span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-slate-800/50 rounded-lg">
+                        <span className="text-slate-400">Inscription</span>
+                        <span className="font-semibold text-blue-400">50€ solo / 25€ duo</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-6 border border-slate-700">
+                    <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
+                      <Crown className="h-5 w-5 text-yellow-400" />
+                      Récompenses
+                    </h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center p-3 bg-gradient-to-r from-yellow-500/20 to-yellow-600/20 rounded-lg border border-yellow-500/30">
+                        <div className="flex items-center gap-2">
+                          <Medal className="h-5 w-5 text-yellow-400" />
+                          <span className="font-semibold">1er place</span>
+                        </div>
+                        <span className="font-bold text-yellow-400">
+                          {currentTournament ? Math.floor(currentTournament.prizePool * 0.5) : 0}€
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-gradient-to-r from-slate-500/20 to-slate-600/20 rounded-lg border border-slate-500/30">
+                        <div className="flex items-center gap-2">
+                          <Medal className="h-5 w-5 text-slate-400" />
+                          <span className="font-semibold">2ème place</span>
+                        </div>
+                        <span className="font-bold text-slate-400">
+                          {currentTournament ? Math.floor(currentTournament.prizePool * 0.3) : 0}€
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center p-3 bg-gradient-to-r from-orange-500/20 to-orange-600/20 rounded-lg border border-orange-500/30">
+                        <div className="flex items-center gap-2">
+                          <Medal className="h-5 w-5 text-orange-400" />
+                          <span className="font-semibold">3ème place</span>
+                        </div>
+                        <span className="font-bold text-orange-400">
+                          {currentTournament ? Math.floor(currentTournament.prizePool * 0.2) : 0}€
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progression du tournoi */}
+                {currentTournament && totalRounds > 0 && (
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-6 border border-slate-700">
+                    <h3 className="text-xl font-bold mb-4">Progression du tournoi</h3>
+                    <div className="flex items-center gap-4">
+                      {Array.from({ length: totalRounds }, (_, i) => i + 1).map((round) => (
+                        <div key={round} className="flex-1 flex items-center gap-2">
+                          <div className={`w-full h-3 rounded-full ${
+                            round < (currentTournament.currentRound || 1) ? "bg-green-500" :
+                            round === (currentTournament.currentRound || 1) ? "bg-blue-500 animate-pulse" :
+                            "bg-slate-700"
+                          }`}></div>
+                          {round < totalRounds && <ArrowRight className="h-5 w-5 text-slate-600 flex-shrink-0" />}
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex justify-between mt-2">
+                      {Array.from({ length: totalRounds }, (_, i) => i + 1).map((round) => (
+                        <p key={round} className="text-xs text-slate-400 flex-1 text-center">
+                          Round {round}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Liste des participants */}
+                {currentTournament && currentTournament.players.length > 0 && (
+                  <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-6 border border-slate-700">
+                    <h3 className="text-xl font-bold mb-4">
+                      Participants ({currentTournament.players.length})
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {currentTournament.players.map((player, index) => (
+                        <motion.div
+                          key={player.userId}
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          transition={{ delay: index * 0.05 }}
+                          className={`p-4 rounded-lg ${
+                            player.userId === user?.uid
+                              ? "bg-gradient-to-r from-blue-500/20 to-purple-500/20 border border-blue-500/50"
+                              : "bg-slate-800/50"
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center font-bold">
+                              {player.username[0]}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-semibold truncate">{player.username}</p>
+                              {player.partnerUsername && (
+                                <p className="text-xs text-slate-400 flex items-center gap-1">
+                                  <Users className="h-3 w-3" />
+                                  avec {player.partnerUsername}
+                                </p>
+                              )}
+                              <p className="text-xs text-slate-400 flex items-center gap-1 mt-1">
                                 <Zap className="h-3 w-3" />
-                                {partner.eloRating} ELO
-                                <span className="ml-2">💰 {partner.fortune}€</span>
+                                {player.eloRating} ELO
                               </p>
                             </div>
-                            <Search className="h-4 w-4 text-muted-foreground group-hover:text-primary" />
-                          </button>
-                        ))}
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            )}
 
-                  {partnerUsername.length > 0 && partnerUsername.length < 2 && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Tapez au moins 2 lettres pour rechercher
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <Button
-                onClick={handleRegister}
-                className="w-full"
-                disabled={fortune < (playMode === "duo" ? ENTRY_FEE_DUO : ENTRY_FEE_SOLO) || isLoading}
+            {currentView === "matches" && (
+              <motion.div
+                key="matches"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
               >
-                {isLoading ? (
+                {Object.keys(matchesByRound).length > 0 ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Inscription en cours...
+                    <div className="mb-6 flex gap-2 overflow-x-auto pb-2">
+                      {Object.keys(matchesByRound).sort((a, b) => Number(b) - Number(a)).map((round) => (
+                        <button
+                          key={round}
+                          onClick={() => setSelectedRound(Number(round))}
+                          className={`px-6 py-3 rounded-xl font-semibold whitespace-nowrap transition-all ${
+                            selectedRound === Number(round)
+                              ? "bg-blue-500 text-white shadow-lg shadow-blue-500/50"
+                              : "bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700"
+                          }`}
+                        >
+                          Round {round}
+                          {Number(round) === currentTournament?.currentRound && (
+                            <span className="ml-2 inline-block w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      {matchesByRound[selectedRound]?.map((match) => {
+                        const matchKey = Object.keys(currentTournament?.matches || {}).find(
+                          key => currentTournament?.matches[key].id === match.id
+                        );
+                        return matchKey ? (
+                          <MatchCard key={match.id} match={match} matchKey={matchKey} />
+                        ) : null;
+                      })}
+                    </div>
                   </>
                 ) : (
-                  "Confirmer l'inscription"
+                  <div className="text-center py-12 bg-slate-900/50 rounded-xl border border-slate-800">
+                    <Trophy className="h-16 w-16 mx-auto mb-4 text-slate-600" />
+                    <p className="text-xl text-slate-400">Aucun match pour le moment</p>
+                    <p className="text-sm text-slate-500 mt-2">Les matchs apparaîtront une fois le tournoi lancé</p>
+                  </div>
                 )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </motion.div>
+              </motion.div>
+            )}
+
+            {currentView === "leaderboard" && (
+              <motion.div
+                key="leaderboard"
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: 20 }}
+                className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-6 border border-slate-700"
+              >
+                <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
+                  <Trophy className="h-6 w-6 text-yellow-400" />
+                  Classement
+                </h3>
+                {leaderboard.length > 0 ? (
+                  <div className="space-y-3">
+                    {leaderboard.map((player, index) => (
+                      <motion.div
+                        key={player.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.1 }}
+                        className={`flex items-center justify-between p-4 rounded-xl ${
+                          player.rank === 1 ? "bg-gradient-to-r from-yellow-500/20 to-yellow-600/20 border border-yellow-500/30" :
+                          player.rank === 2 ? "bg-gradient-to-r from-slate-500/20 to-slate-600/20 border border-slate-500/30" :
+                          player.rank === 3 ? "bg-gradient-to-r from-orange-500/20 to-orange-600/20 border border-orange-500/30" :
+                          "bg-slate-800/50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-4">
+                          <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold text-lg ${
+                            player.rank === 1 ? "bg-gradient-to-br from-yellow-400 to-yellow-600 text-white" :
+                            player.rank === 2 ? "bg-gradient-to-br from-slate-400 to-slate-600 text-white" :
+                            player.rank === 3 ? "bg-gradient-to-br from-orange-400 to-orange-600 text-white" :
+                            "bg-slate-700 text-slate-300"
+                          }`}>
+                            #{player.rank}
+                          </div>
+                          <div>
+                            <p className="font-semibold text-lg">{player.name}</p>
+                            <p className="text-sm text-slate-400 flex items-center gap-2">
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                              {player.wins} victoire{player.wins > 1 ? 's' : ''}
+                              <span className="ml-2 flex items-center gap-1">
+                                <Zap className="h-4 w-4" />
+                                {player.elo}
+                              </span>
+                            </p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-yellow-400">{player.prize}€</p>
+                          <p className="text-xs text-slate-400">Gains potentiels</p>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Medal className="h-16 w-16 mx-auto mb-4 text-slate-600" />
+                    <p className="text-xl text-slate-400">Aucun classement disponible</p>
+                    <p className="text-sm text-slate-500 mt-2">Le classement apparaîtra une fois les matchs commencés</p>
+                  </div>
+                )}
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Modal d'inscription */}
+          <AnimatePresence>
+            {showRegisterModal && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+                onClick={() => setShowRegisterModal(false)}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.9, y: 20 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-8 border border-slate-700 max-w-md w-full max-h-[90vh] overflow-y-auto"
+                >
+                  <h2 className="text-2xl font-bold mb-6">Inscription au Tournoi</h2>
+                  
+                  <div className="mb-6">
+                    <p className="text-slate-400 mb-2">Votre fortune : <span className="font-bold text-white">{fortune}€</span></p>
+                    <p className="text-slate-400 mb-4">
+                      Choisissez votre mode de jeu :
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <button
+                        onClick={() => setPlayMode("solo")}
+                        className={`p-6 rounded-xl border-2 transition-all ${
+                          playMode === "solo"
+                            ? "border-blue-500 bg-blue-500/20"
+                            : "border-slate-700 hover:border-slate-600"
+                        }`}
+                      >
+                        <Trophy className="h-8 w-8 mx-auto mb-2 text-blue-400" />
+                        <p className="font-bold mb-1">Solo</p>
+                        <p className="text-sm text-slate-400">50€</p>
+                      </button>
+                      <button
+                        onClick={() => setPlayMode("duo")}
+                        className={`p-6 rounded-xl border-2 transition-all ${
+                          playMode === "duo"
+                            ? "border-purple-500 bg-purple-500/20"
+                            : "border-slate-700 hover:border-slate-600"
+                        }`}
+                      >
+                        <Users className="h-8 w-8 mx-auto mb-2 text-purple-400" />
+                        <p className="font-bold mb-1">Duo</p>
+                        <p className="text-sm text-slate-400">25€ / joueur</p>
+                      </button>
+                    </div>
+                  </div>
+
+                  {playMode === "duo" && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mb-6"
+                    >
+                      <label className="block text-sm font-semibold mb-2">Rechercher un partenaire</label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 z-10" />
+                        {isSearching && (
+                          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-slate-400 z-10" />
+                        )}
+                        <input
+                          type="text"
+                          value={partnerSearch}
+                          onChange={(e) => setPartnerSearch(e.target.value)}
+                          placeholder="Nom du joueur..."
+                          className="w-full pl-10 pr-10 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:border-blue-500 transition-colors text-white"
+                        />
+                      </div>
+                      
+                      {partnerSearch.length >= 2 && suggestions.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="mt-3 space-y-2 max-h-48 overflow-y-auto"
+                        >
+                          {suggestions.map((partner) => (
+                            <button
+                              key={partner.id}
+                              onClick={() => setPartnerSearch(partner.username)}
+                              className="w-full p-3 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 hover:border-blue-500/50 transition-all text-left"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <p className="font-semibold">{partner.username}</p>
+                                  <p className="text-xs text-slate-400 flex items-center gap-2 mt-1">
+                                    <Zap className="h-3 w-3" />
+                                    {partner.eloRating} ELO
+                                    <span className="ml-2">💰 {partner.fortune}€</span>
+                                  </p>
+                                </div>
+                                <CheckCircle2 className="h-5 w-5 text-green-500" />
+                              </div>
+                            </button>
+                          ))}
+                        </motion.div>
+                      )}
+
+                      {partnerSearch.length > 0 && partnerSearch.length < 2 && (
+                        <p className="text-xs text-slate-400 mt-2">
+                          Tapez au moins 2 lettres pour rechercher
+                        </p>
+                      )}
+                    </motion.div>
+                  )}
+
+                  <div className="bg-slate-800/50 rounded-xl p-4 mb-6">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400">Frais d'inscription</span>
+                      <span className="font-bold text-blue-400">
+                        {playMode === "solo" ? "50€" : "25€"}
+                      </span>
+                    </div>
+                    {fortune < (playMode === "solo" ? ENTRY_FEE_SOLO : ENTRY_FEE_DUO) && (
+                      <p className="text-xs text-red-400 mt-2">
+                        ⚠️ Vous n'avez pas assez de fortune pour participer
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowRegisterModal(false)}
+                      className="flex-1 px-6 py-3 bg-slate-800 hover:bg-slate-700 rounded-xl font-semibold transition-colors"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      onClick={handleRegister}
+                      disabled={
+                        isLoading || 
+                        fortune < (playMode === "solo" ? ENTRY_FEE_SOLO : ENTRY_FEE_DUO) ||
+                        (playMode === "duo" && !partnerSearch.trim())
+                      }
+                      className="flex-1 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-xl font-semibold transition-all transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                    >
+                      {isLoading ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Inscription...
+                        </span>
+                      ) : (
+                        "Confirmer"
+                      )}
+                    </button>
+                  </div>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Modal des règles */}
+          <AnimatePresence>
+            {showRulesDialog && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+                onClick={() => setShowRulesDialog(false)}
+              >
+                <motion.div
+                  initial={{ scale: 0.9, y: 20 }}
+                  animate={{ scale: 1, y: 0 }}
+                  exit={{ scale: 0.9, y: 20 }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl p-8 border border-slate-700 max-w-2xl w-full max-h-[90vh] overflow-y-auto"
+                >
+                  <div className="flex items-center gap-2 mb-6">
+                    <AlertCircle className="h-6 w-6 text-blue-400" />
+                    <h2 className="text-2xl font-bold">Règles du Tournoi</h2>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                        <Clock className="h-5 w-5 text-blue-400" />
+                        Horaires
+                      </h3>
+                      <p className="text-slate-300">
+                        Le tournoi se déroule tous les jours de <strong className="text-white">13h00 à 14h15</strong> (1h15 de compétition)
+                      </p>
+                    </div>
+
+                    <div>
+                      <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                        <Users className="h-5 w-5 text-purple-400" />
+                        Modes de jeu
+                      </h3>
+                      <ul className="space-y-2 text-slate-300">
+                        <li className="flex items-start gap-2">
+                          <span className="text-blue-400 mt-1">•</span>
+                          <span><strong className="text-white">Solo :</strong> Affrontez les autres joueurs individuellement (50€)</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-purple-400 mt-1">•</span>
+                          <span><strong className="text-white">Duo :</strong> Formez une équipe avec un partenaire (25€ par personne)</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                        <Trophy className="h-5 w-5 text-yellow-400" />
+                        Déroulement
+                      </h3>
+                      <ul className="space-y-2 text-slate-300">
+                        <li className="flex items-start gap-2">
+                          <span className="text-green-400 mt-1">•</span>
+                          <span>Chaque match dure exactement <strong className="text-white">5 minutes</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-green-400 mt-1">•</span>
+                          <span>Les matchs sont organisés en <strong className="text-white">élimination directe</strong></span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-green-400 mt-1">•</span>
+                          <span>Le gagnant de chaque match passe au round suivant</span>
+                        </li>
+                        <li className="flex items-start gap-2">
+                          <span className="text-green-400 mt-1">•</span>
+                          <span>Le tournoi continue jusqu'à ce qu'il ne reste qu'un seul vainqueur</span>
+                        </li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                        <Crown className="h-5 w-5 text-yellow-400" />
+                        Récompenses
+                      </h3>
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-3 bg-yellow-500/10 rounded-lg border border-yellow-500/30">
+                          <span className="flex items-center gap-2">
+                            <Medal className="h-4 w-4 text-yellow-400" />
+                            <span className="font-semibold text-yellow-400">1er place</span>
+                          </span>
+                          <span className="font-bold text-yellow-400">50% de la cagnotte</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-slate-500/10 rounded-lg border border-slate-500/30">
+                          <span className="flex items-center gap-2">
+                            <Medal className="h-4 w-4 text-slate-400" />
+                            <span className="font-semibold text-slate-400">2ème place</span>
+                          </span>
+                          <span className="font-bold text-slate-400">30% de la cagnotte</span>
+                        </div>
+                        <div className="flex items-center justify-between p-3 bg-orange-500/10 rounded-lg border border-orange-500/30">
+                          <span className="flex items-center gap-2">
+                            <Medal className="h-4 w-4 text-orange-400" />
+                            <span className="font-semibold text-orange-400">3ème place</span>
+                          </span>
+                          <span className="font-bold text-orange-400">20% de la cagnotte</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <h3 className="font-bold text-lg mb-2 flex items-center gap-2">
+                        <Sparkles className="h-5 w-5 text-pink-400" />
+                        Bonus
+                      </h3>
+                      <p className="text-slate-300">
+                        Les bonus de club sont actifs pendant le tournoi !
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => setShowRulesDialog(false)}
+                    className="w-full mt-6 px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 rounded-xl font-semibold transition-all"
+                  >
+                    J'ai compris
+                  </button>
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          {/* Tournoi terminé */}
+          {currentTournament?.status === 'completed' && currentTournament.winners.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="fixed inset-0 bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 z-50"
+            >
+              <motion.div
+                initial={{ y: 50 }}
+                animate={{ y: 0 }}
+                className="bg-gradient-to-br from-yellow-600 via-yellow-500 to-yellow-600 rounded-2xl p-12 border border-yellow-400/50 text-center max-w-lg"
+              >
+                <motion.div
+                  animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }}
+                  transition={{ duration: 2, repeat: Infinity }}
+                  className="text-9xl mb-6"
+                >
+                  🏆
+                </motion.div>
+                <h2 className="text-4xl font-bold text-white mb-4">
+                  Tournoi terminé !
+                </h2>
+                <p className="text-xl text-white/90 mb-6">
+                  Félicitations au vainqueur ! 🎉
+                </p>
+                <div className="bg-white/20 backdrop-blur-sm rounded-xl p-6 mb-6">
+                  <p className="text-5xl font-bold text-white mb-2">
+                    {Math.floor(currentTournament.prizePool * 0.5)}€
+                  </p>
+                  <p className="text-white/80">Gain du vainqueur</p>
+                </div>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-8 py-4 bg-white text-yellow-600 rounded-xl font-bold hover:scale-105 transition-transform"
+                >
+                  Retour à l'accueil
+                </button>
+              </motion.div>
+            </motion.div>
+          )}
+        </div>
+      </div>
     </AppLayout>
   );
 };

@@ -5,6 +5,7 @@
 
 import { ref, push, update } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 
 export interface Notification {
   id: string;
@@ -53,9 +54,9 @@ async function createNotification(
       createdAt: Date.now(),
     });
 
-    console.log(`✅ Notification envoyée à ${userId}: ${title}`);
+    logger.log(`✅ Notification envoyée à ${userId}: ${title}`);
   } catch (error) {
-    console.error("❌ Erreur création notification:", error);
+    logger.error("❌ Erreur création notification:", error);
     throw error;
   }
 }
@@ -282,7 +283,7 @@ export async function notifyAllUsers(
     const snapshot = await get(usersRef);
 
     if (!snapshot.exists()) {
-      console.warn("⚠️ Aucun utilisateur trouvé");
+      logger.warn("⚠️ Aucun utilisateur trouvé");
       return;
     }
 
@@ -296,9 +297,9 @@ export async function notifyAllUsers(
     });
 
     await Promise.all(promises);
-    console.log(`✅ Notification envoyée à ${promises.length} utilisateurs`);
+    logger.log(`✅ Notification envoyée à ${promises.length} utilisateurs`);
   } catch (error) {
-    console.error("❌ Erreur notification globale:", error);
+    logger.error("❌ Erreur notification globale:", error);
     throw error;
   }
 }

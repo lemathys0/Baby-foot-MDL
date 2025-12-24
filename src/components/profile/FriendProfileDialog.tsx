@@ -12,6 +12,7 @@ import { database } from "@/lib/firebase";
 import { getUserBadges, type Badge as BadgeType } from "@/lib/firebaseExtended";
 import { getCardStats } from "@/lib/firebaseCards";
 import { toast } from "@/hooks/use-toast";
+import { logger } from '@/utils/logger';
 
 interface FriendProfileDialogProps {
   friendId: string;
@@ -122,7 +123,7 @@ export function FriendProfileDialog({
         }
       }
     } catch (error) {
-      console.error("Erreur chargement profil ami:", error);
+      logger.error("Erreur chargement profil ami:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger le profil",

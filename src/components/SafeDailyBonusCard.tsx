@@ -1,5 +1,6 @@
 import { Component, ReactNode } from 'react';
 import DailyBonusCard from './DailyBonusCard';
+import { logger } from '@/utils/logger';
 
 interface Props {
   children?: ReactNode;
@@ -21,13 +22,13 @@ class DailyBonusErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error, errorInfo: any) {
-    console.error('❌ Erreur DailyBonus:', error, errorInfo);
+    logger.error('❌ Erreur DailyBonus:', error, errorInfo);
   }
 
   render() {
     if (this.state.hasError) {
       // En cas d'erreur, ne rien afficher (fail silently)
-      console.warn('⚠️ Le composant bonus quotidien a rencontré une erreur et a été désactivé');
+      logger.warn('⚠️ Le composant bonus quotidien a rencontré une erreur et a été désactivé');
       return null;
     }
 

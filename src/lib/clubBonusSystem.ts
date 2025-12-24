@@ -1,6 +1,7 @@
 // src/lib/clubBonusSystem.ts
 import { ref, get } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 
 interface ClubBonuses {
   xpBoost: boolean; // +20% ELO gagné
@@ -44,7 +45,7 @@ export async function getUserClubBonuses(userId: string): Promise<ClubBonuses> {
       premiumCards: clubData.bonuses?.premiumCards || false,
     };
   } catch (error) {
-    console.error("Erreur récupération bonus club:", error);
+    logger.error("Erreur récupération bonus club:", error);
     return defaultBonuses;
   }
 }
@@ -53,16 +54,24 @@ export async function getUserClubBonuses(userId: string): Promise<ClubBonuses> {
  * Appliquer le bonus XP (ELO)
  * ✅ FIX: Nom de paramètre cohérent
  */
-export function applyXPBonus(baseELO: number, hasBonus: boolean): number {
-  if (!hasBonus) return baseELO;
-  return Math.round(baseELO * 1.2); // +20%
+export function applyXPBonus(newELO: number, oldELO: number): number {
+  const gain = newELO - oldELO;
+  const bonusGain = Math.round(gain * 1.2); // +20% sur le gain
+  return oldELO + bonusGain;
 }
 
 /**
  * Appliquer le bonus Fortune
- * ✅ FIX: Nom de paramètre cohérent
+ * ✅ FIX: Surcharge pour accepter soit un montant simple, soit avec boolean
  */
-export function applyFortuneBonus(baseAmount: number, hasBonus: boolean): number {
+export function applyFortuneBonus(baseAmount: number): number {
+  return Math.round(baseAmount * 1.15); // +15%
+}
+
+/**
+ * Version avec boolean pour compatibilité
+ */
+export function applyFortuneBonusWithFlag(baseAmount: number, hasBonus: boolean): number {
   if (!hasBonus) return baseAmount;
   return Math.round(baseAmount * 1.15); // +15%
 }
@@ -81,14 +90,15 @@ export function applyPremiumCardsBonus(baseChance: number, hasBonus: boolean): n
  */
 export async function calculateMatchRewards(
   userId: string,
-  baseELO: number,
+  newELO: number,
+  oldELO: number,
   baseFortune: number
 ): Promise<{ elo: number; fortune: number }> {
   const bonuses = await getUserClubBonuses(userId);
-  
-  const elo = applyXPBonus(baseELO, bonuses.xpBoost);
-  const fortune = applyFortuneBonus(baseFortune, bonuses.fortuneBoost);
-  
+
+  const elo = bonuses.xpBoost ? applyXPBonus(newELO, oldELO) : newELO;
+  const fortune = bonuses.fortuneBoost ? applyFortuneBonus(baseFortune) : baseFortune;
+
   return { elo, fortune };
 }
 
@@ -102,6 +112,9 @@ export async function getCardDropRate(
   const bonuses = await getUserClubBonuses(userId);
   return applyPremiumCardsBonus(baseRareChance, bonuses.premiumCards);
 }
+
+// Alias pour compatibilité
+export const getClubBonuses = getUserClubBonuses;
 
 /**
  * Afficher un résumé des bonus actifs

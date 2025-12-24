@@ -17,6 +17,7 @@ import {
   type SuspiciousActivity 
 } from "@/lib/firebaseAntiCheat";
 import { toast } from "@/hooks/use-toast";
+import { logger } from '@/utils/logger';
 
 export const AntiCheatTab = () => {
   const [activities, setActivities] = useState<SuspiciousActivity[]>([]);
@@ -41,7 +42,7 @@ export const AntiCheatTab = () => {
       setActivities(activitiesData);
       setStats(statsData);
     } catch (error) {
-      console.error("Erreur chargement anti-cheat:", error);
+      logger.error("Erreur chargement anti-cheat:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger les données anti-cheat",

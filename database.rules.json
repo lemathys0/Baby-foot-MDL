@@ -1,6 +1,458 @@
 {
   "rules": {
-    ".read": true,
-    ".write": true
+    ".read": false,
+    ".write": false,
+    
+    "users": {
+      ".read": "auth != null",
+      "$userId": {
+        ".read": true,
+        ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        ".indexOn": ["eloRating", "elo1v1", "elo2v2", "eloGlobal", "fortune", "username", "banned", "wins", "losses", "lastActive"],
+        
+        "username": {
+          ".validate": "newData.isString() && newData.val().length >= 3 && newData.val().length <= 20"
+        },
+        "elo1v1": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+        },
+        "elo2v2": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+        },
+        "eloGlobal": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+        },
+        "eloRating": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+        },
+        "fortune": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "cards": {
+          ".read": "auth != null",
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          "$cardCode": {
+            ".validate": "newData.isNumber() && newData.val() >= 0"
+          }
+        },
+        "totalEarned": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "wins": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "losses": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "wins1v1": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "losses1v1": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "wins2v2": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "losses2v2": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "winsMixed": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "lossesMixed": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "bettingGains": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "winStreak": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "thursdayWins": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "betWins": {
+          ".write": "auth != null",
+          ".validate": "newData.isNumber() && newData.val() >= 0"
+        },
+        "role": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+          ".validate": "newData.isString() && (newData.val() == 'admin' || newData.val() == 'player' || newData.val() == 'agent')"
+        },
+        "banned": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'"
+        },
+        "bannedAt": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+          ".validate": "newData.isString()"
+        },
+        "bannedBy": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+          ".validate": "newData.isString()"
+        },
+        "unbannedAt": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+          ".validate": "newData.isString()"
+        },
+        "unbannedBy": {
+          ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+          ".validate": "newData.isString()"
+        },
+        "email": {
+          ".validate": "newData.isString()"
+        },
+        "createdAt": {
+          ".validate": "newData.isString()"
+        },
+        "avatar": {
+          ".validate": "newData.isString()"
+        },
+        "theme": {
+          ".validate": "newData.isString()"
+        },
+        "banner": {
+          ".validate": "newData.isString()"
+        },
+        "title": {
+          ".validate": "newData.isString()"
+        },
+        "effect": {
+          ".validate": "newData.isString()"
+        },
+        "badges": {
+          ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')"
+        },
+        "lastActive": {
+          ".write": "auth != null && auth.uid == $userId",
+          ".validate": "newData.isNumber()"
+        },
+        "inventory": {
+          ".read": "auth != null && auth.uid == $userId",
+          ".write": "auth != null && auth.uid == $userId"
+        },
+        "settings": {
+          ".read": "auth != null && auth.uid == $userId",
+          ".write": "auth != null && auth.uid == $userId",
+          "$settingKey": {
+            ".read": "auth != null && auth.uid == $userId",
+            ".write": "auth != null && auth.uid == $userId"
+          }
+        },
+        "clubId": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+    
+    "userBadges": {
+      "$userId": {
+        ".read": true,
+        ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')"
+      }
+    },
+    
+    "fortuneHistory": {
+      "$userId": {
+        ".read": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        ".write": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        "$entryId": {
+          ".validate": "newData.hasChildren()"
+        }
+      }
+    },
+    
+    "matches": {
+      ".read": true,
+      ".indexOn": ["timestamp", "date", "matchType"],
+      "$matchId": {
+        ".write": "auth != null"
+      }
+    },
+    
+    "bettingMatches": {
+      ".read": true,
+      "$matchId": {
+        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() == auth.uid || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        ".validate": "newData.hasChildren(['team1', 'team2', 'status', 'createdAt', 'createdBy'])",
+        "bets": {
+          "$userId": {
+            ".write": "auth != null && auth.uid == $userId"
+          }
+        }
+      }
+    },
+    
+    "friendRequests": {
+      ".read": "auth != null",
+      "$requestId": {
+        ".read": "auth != null && (data.child('from').val() == auth.uid || data.child('to').val() == auth.uid)",
+        ".write": "auth != null"
+      }
+    },
+    
+    "friends": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "$friendId": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    "clubs": {
+      ".read": true,
+      "$clubId": {
+        ".write": "auth != null && (!data.exists() && newData.child('founderId').val() == auth.uid || data.exists() && (data.child('founderId').val() == auth.uid || data.child('members').child(auth.uid).exists()))",
+        "members": {
+          "$memberId": {
+            ".write": "auth != null && (auth.uid == $memberId || root.child('clubs').child($clubId).child('founderId').val() == auth.uid)"
+          }
+        },
+        "bonuses": {
+          ".write": "auth != null && root.child('clubs').child($clubId).child('founderId').val() == auth.uid"
+        }
+      }
+    },
+    
+    "tournaments": {
+      ".read": true,
+      ".indexOn": ["status", "startDate"],
+      "$tournamentId": {
+        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'admin' || root.child('users').child(auth.uid).child('role').val() == 'agent')",
+        "players": {
+          ".write": "auth != null"
+        },
+        "prizePool": {
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    "matchQueue": {
+      ".read": true,
+      "$userId": {
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "userStatus": {
+      ".read": true,
+      "$userId": {
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "userSettings": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "userChallenges": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId"
+      }
+    },
+    
+    "cardMarket": {
+      ".read": true,
+      "$listingId": {
+        ".read": true,
+        ".write": "auth != null && (!data.exists() && newData.child('sellerId').val() == auth.uid || data.exists() && (data.child('sellerId').val() == auth.uid || newData.child('status').val() == 'sold' || newData.child('status').val() == 'cancelled'))",
+        ".validate": "newData.hasChildren(['sellerId', 'cardCode', 'price', 'status', 'createdAt'])"
+      }
+    },
+    
+    "cardOffers": {
+      ".read": "auth != null",
+      ".indexOn": ["buyerId", "sellerId", "listingId", "status"],
+      "$offerId": {
+        ".read": "auth != null && (data.child('buyerId').val() == auth.uid || data.child('sellerId').val() == auth.uid)",
+        ".write": "auth != null && (!data.exists() && newData.child('buyerId').val() == auth.uid || data.exists() && (data.child('buyerId').val() == auth.uid || data.child('sellerId').val() == auth.uid))",
+        ".validate": "newData.hasChildren(['buyerId', 'sellerId', 'listingId', 'offerPrice', 'status', 'createdAt'])"
+      }
+    },
+    
+    "marketStats": {
+      ".read": true,
+      "$cardCode": {
+        ".write": "auth != null"
+      }
+    },
+    
+    "notifications": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null",
+        "$notificationId": {
+          ".read": "auth != null && auth.uid == $userId",
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    "chats": {
+      ".read": "auth != null",
+      "$chatId": {
+        ".read": "auth != null && ($chatId == 'admin_info' || $chatId == 'admin_chat' || !data.exists() || data.child('m').hasChild(auth.uid) || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        ".write": "auth != null",
+        ".indexOn": ["ca", "t"],
+        "messages": {
+          ".indexOn": ["ts"],
+          "$messageId": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+          }
+        },
+        "m": {
+          "$memberId": {
+            ".write": "auth != null"
+          }
+        },
+        "ca": {
+          ".validate": "newData.isNumber()"
+        },
+        "t": {
+          ".validate": "newData.isString()"
+        }
+      }
+    },
+    
+    "userChats": {
+      ".read": "auth != null",
+      "$userId": {
+        ".read": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+        ".write": "auth != null",
+        "$chatId": {
+          ".read": "auth != null && (auth.uid == $userId || root.child('users').child(auth.uid).child('role').val() == 'admin')",
+          ".write": "auth != null"
+        }
+      }
+    },
+    
+    "suspicious_activities": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+      ".write": "auth != null",
+      ".indexOn": ["timestamp", "userId", "type", "severity", "resolved"],
+      "$activityId": {
+        ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+        ".write": "auth != null",
+        ".validate": "newData.hasChildren(['userId', 'username', 'type', 'severity', 'description', 'timestamp', 'resolved'])",
+        "userId": {
+          ".validate": "newData.isString()"
+        },
+        "username": {
+          ".validate": "newData.isString()"
+        },
+        "type": {
+          ".validate": "newData.isString() && (newData.val() == 'fortune_spike' || newData.val() == 'elo_spike' || newData.val() == 'rapid_actions' || newData.val() == 'negative_value' || newData.val() == 'unusual_pattern')"
+        },
+        "severity": {
+          ".validate": "newData.isString() && (newData.val() == 'low' || newData.val() == 'medium' || newData.val() == 'high')"
+        },
+        "description": {
+          ".validate": "newData.isString()"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber()"
+        },
+        "resolved": {
+          ".validate": "newData.isBoolean()"
+        },
+        "oldValue": {
+          ".validate": "newData.isNumber()"
+        },
+        "newValue": {
+          ".validate": "newData.isNumber()"
+        },
+        "resolvedAt": {
+          ".validate": "newData.isNumber()"
+        },
+        "resolvedBy": {
+          ".validate": "newData.isString()"
+        },
+        "metadata": {
+          ".validate": "newData.hasChildren()"
+        }
+      }
+    },
+    
+    "admin_logs": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+      ".indexOn": ["timestamp", "adminId", "action"],
+      "$logId": {
+        ".validate": "newData.hasChildren(['adminId', 'adminName', 'action', 'timestamp'])",
+        "adminId": {
+          ".validate": "newData.isString()"
+        },
+        "adminName": {
+          ".validate": "newData.isString()"
+        },
+        "action": {
+          ".validate": "newData.isString()"
+        },
+        "timestamp": {
+          ".validate": "newData.isNumber()"
+        },
+        "targetUserId": {
+          ".validate": "newData.isString()"
+        },
+        "targetUsername": {
+          ".validate": "newData.isString()"
+        },
+        "details": {
+          ".validate": "newData.hasChildren()"
+        }
+      }
+    },
+    
+    "migration_status": {
+      ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'",
+      ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'admin'"
+    },
+
+    "quests": {
+      "$userId": {
+        ".read": "auth != null && auth.uid == $userId",
+        ".write": "auth != null && auth.uid == $userId",
+        "daily": {
+          ".validate": "newData.hasChildren()"
+        },
+        "weekly": {
+          ".validate": "newData.hasChildren()"
+        },
+        "special": {
+          ".validate": "newData.hasChildren()"
+        },
+        "lastDailyReset": {
+          ".validate": "newData.isNumber()"
+        },
+        "lastWeeklyReset": {
+          ".validate": "newData.isNumber()"
+        }
+      }
+    }
   }
 }

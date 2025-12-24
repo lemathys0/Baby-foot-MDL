@@ -23,6 +23,7 @@ import {
   MatchWithBetting 
 } from "@/lib/firebaseMatch";
 import { safeFirebaseQuery } from "@/utils/safeFirebaseQuery";
+import { logger } from '@/utils/logger';
 
 type Player = { id: string; username: string; eloRating: number };
 
@@ -64,7 +65,7 @@ const BettingMatches = () => {
         setAgentFortune(snapshot.val().fortune || 0);
       }
     } catch (error) {
-      console.error("Erreur chargement fortune:", error);
+      logger.error("Erreur chargement fortune:", error);
     }
   };
 
@@ -141,7 +142,7 @@ const BettingMatches = () => {
         "⚽ Nouveau match disponible",
         "Un nouveau match est ouvert aux paris. Tentez votre chance !"
       ).catch(error => {
-        console.error(`Erreur notification pour ${playerId}:`, error);
+        logger.error(`Erreur notification pour ${playerId}:`, error);
       })
     );
     
@@ -157,7 +158,7 @@ const BettingMatches = () => {
     setTeam2Ids([]);
     loadData();
   } catch (error: any) {
-    console.error("Erreur création match:", error);
+    logger.error("Erreur création match:", error);
     toast({
       title: "Erreur",
       description: error.message || "Impossible de créer le match",
@@ -240,7 +241,7 @@ const BettingMatches = () => {
           const isWinner = (winnings as number) > 0;
           
           return notifyBetResult(userId, isWinner, amount).catch(error => {
-            console.error(`Erreur notification pour ${userId}:`, error);
+            logger.error(`Erreur notification pour ${userId}:`, error);
           });
         }
       );
@@ -271,7 +272,7 @@ const BettingMatches = () => {
     await loadData();
     await loadAgentFortune();
   } catch (error: any) {
-    console.error("Erreur fin de match:", error);
+    logger.error("Erreur fin de match:", error);
     toast({
       title: "Erreur",
       description: error.message || "Impossible de terminer le match",
@@ -312,8 +313,8 @@ const BettingMatches = () => {
   const finalOdds1 = Math.max(rawOdds1, 1.10);
   const finalOdds2 = Math.max(rawOdds2, 1.10);
   
-  console.log(`📊 [COTES] Équipe 1: brut=${rawOdds1.toFixed(2)}, final=${finalOdds1.toFixed(2)}`);
-  console.log(`📊 [COTES] Équipe 2: brut=${rawOdds2.toFixed(2)}, final=${finalOdds2.toFixed(2)}`);
+  logger.log(`📊 [COTES] Équipe 1: brut=${rawOdds1.toFixed(2)}, final=${finalOdds1.toFixed(2)}`);
+  logger.log(`📊 [COTES] Équipe 2: brut=${rawOdds2.toFixed(2)}, final=${finalOdds2.toFixed(2)}`);
   
   return { 
     odds1: finalOdds1.toFixed(2), 
@@ -502,7 +503,7 @@ const BettingMatches = () => {
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-lg flex items-center gap-2">
                         <Trophy className="h-5 w-5 text-primary" />
-                        {match.team1Names.join(" & ")} vs {match.team2Names.join(" & ")}
+                        {match.team1Names?.join(" & ") || "Équipe 1"} vs {match.team2Names?.join(" & ") || "Équipe 2"}
                       </CardTitle>
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-semibold ${

@@ -33,7 +33,7 @@ import { toast } from "@/hooks/use-toast";
 import { FriendProfileDialog } from "@/components/profile/FriendProfileDialog";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { ref, get } from "firebase/database";
+import { ref, get, onValue } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { 
   getFriends, getPendingFriendRequests, sendFriendRequest, acceptFriendRequest, 
@@ -44,9 +44,10 @@ import { getUserTaxInfo, payTaxesManually, isLastWeekendOfMonth, getDaysUntilLas
 import { calculateTaxRate } from "@/lib/utils";
 import { SHOP_ITEMS, type ShopItem } from "@/lib/firebaseExtended";
 import { applyTheme } from "@/lib/applyTheme";
-import { 
-  getReceivedOffers, getSentOffers, acceptOffer, rejectOffer, counterOffer, 
-  getMarketStats, type Offer, type MarketStats 
+import { logger } from '@/utils/logger';
+import {
+  getReceivedOffers, getSentOffers, acceptOffer, rejectOffer, counterOffer,
+  getMarketStats, type Offer, type MarketStats
 } from "@/lib/firebaseMarket";
 
 interface TaxInfoCardProps {
@@ -65,7 +66,7 @@ const TaxInfoCard = ({ userId, fortune, bettingGains }: TaxInfoCardProps) => {
       const info = await getUserTaxInfo(userId);
       setTaxInfo(info);
     } catch (error) {
-      console.error("Erreur chargement taxes:", error);
+      logger.error("Erreur chargement taxes:", error);
     } finally {
       setIsLoading(false);
     }
@@ -297,21 +298,41 @@ const TaxInfoCard = ({ userId, fortune, bettingGains }: TaxInfoCardProps) => {
 };
 const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: any }) => {
   const getItemDetails = (itemId: string): ShopItem | null => {
-    return SHOP_ITEMS.find(item => item.id === itemId) || null;
+    logger.log("🔍 [EquippedItems] Recherche item:", itemId);
+    if (!itemId || !SHOP_ITEMS || !Array.isArray(SHOP_ITEMS)) {
+      logger.log("⚠️ [EquippedItems] ItemId vide ou SHOP_ITEMS invalide");
+      return null;
+    }
+    const item = SHOP_ITEMS.find(item => item && item.id === itemId) || null;
+    logger.log("✅ [EquippedItems] Item trouvé:", item?.name || "null");
+    return item;
   };
 
-  const equippedAvatar = equipped.avatar ? getItemDetails(equipped.avatar) : null;
-  const equippedTheme = equipped.theme ? getItemDetails(equipped.theme) : null;
-  const equippedBanner = equipped.banner ? getItemDetails(equipped.banner) : null;
-  const equippedTitle = equipped.title ? getItemDetails(equipped.title) : null;
-  const equippedEffect = equipped.effect ? getItemDetails(equipped.effect) : null;
+  logger.log("🎨 [EquippedItems] Equipped data:", equipped);
+  
+  // Vérification plus robuste pour éviter les erreurs
+  const equippedAvatar = (equipped?.avatar && equipped.avatar !== "") ? getItemDetails(equipped.avatar) : null;
+  const equippedTheme = (equipped?.theme && equipped.theme !== "") ? getItemDetails(equipped.theme) : null;
+  const equippedBanner = (equipped?.banner && equipped.banner !== "") ? getItemDetails(equipped.banner) : null;
+  const equippedTitle = (equipped?.title && equipped.title !== "") ? getItemDetails(equipped.title) : null;
+  const equippedEffect = (equipped?.effect && equipped.effect !== "") ? getItemDetails(equipped.effect) : null;
+  
+  logger.log("🎭 [EquippedItems] Items équipés:", {
+    avatar: equippedAvatar?.name || "none",
+    theme: equippedTheme?.name || "none",
+    banner: equippedBanner?.name || "none",
+    title: equippedTitle?.name || "none",
+    effect: equippedEffect?.name || "none"
+  });
 
   const totalItems = Object.keys(inventory || {}).reduce((acc, type) => {
-    if (typeof inventory[type] === 'object') {
+    if (inventory && typeof inventory[type] === 'object') {
       return acc + Object.keys(inventory[type]).length;
     }
     return acc;
   }, 0);
+  
+  logger.log("📦 [EquippedItems] Total items dans l'inventaire:", totalItems);
 
   return (
     <Card className="border-2 border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
@@ -368,11 +389,11 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
                   style={{ background: (equippedBanner as any).preview }}
                 >
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl">{equippedBanner.icon}</span>
+                    <span className="text-2xl">{equippedBanner.icon || "🎪"}</span>
                   </div>
                 </div>
               ) : (
-                <div className="text-3xl">{equippedBanner.icon}</div>
+                <div className="text-3xl">{equippedBanner.icon || "🎪"}</div>
               )}
               <div>
                 <p className="text-sm font-medium">{equippedBanner.name}</p>
@@ -389,7 +410,7 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
           <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
             <div className="flex items-center gap-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-gradient-to-r from-sky-500/30 via-cyan-500/30 to-indigo-500/30 border border-cyan-400/60">
-                <span className="text-xl">{equippedTitle.icon}</span>
+                <span className="text-xl">{equippedTitle.icon || "👑"}</span>
                 <span className="text-[11px] font-semibold tracking-wide uppercase text-cyan-100">
                   {(equippedTitle as any).preview || equippedTitle.name}
                 </span>
@@ -407,7 +428,7 @@ const EquippedItemsCard = ({ equipped, inventory }: { equipped: any, inventory: 
         {equippedEffect && (
           <div className="flex items-center justify-between p-3 rounded-lg bg-surface-alt border border-border">
             <div className="flex items-center gap-3">
-              <div className="text-3xl">{equippedEffect.icon}</div>
+              <div className="text-3xl">{equippedEffect.icon || "✨"}</div>
               <div>
                 <p className="text-sm font-medium">{equippedEffect.name}</p>
                 <p className="text-xs text-muted-foreground">Effet</p>
@@ -475,7 +496,7 @@ const RecentMatchesCard = ({ userId }: { userId: string }) => {
         all.sort((a, b) => b.timestamp - a.timestamp);
         setMatches(all.slice(0, 6));
       } catch (error) {
-        console.error("Erreur chargement matchs récents:", error);
+        logger.error("Erreur chargement matchs récents:", error);
       } finally {
         setIsLoading(false);
       }
@@ -642,7 +663,7 @@ const MyOffersSection = ({ userId }: { userId: string }) => {
       setReceivedOffers(received);
       setSentOffers(sent);
     } catch (error) {
-      console.error("Erreur chargement offres:", error);
+      logger.error("Erreur chargement offres:", error);
     } finally {
       setIsLoading(false);
     }
@@ -661,7 +682,7 @@ const MyOffersSection = ({ userId }: { userId: string }) => {
           userProfile?.username || "Un vendeur",
           offer.listingId
         ).catch(error => {
-          console.error("Erreur notification:", error);
+          logger.error("Erreur notification:", error);
         });
       }
       
@@ -695,7 +716,7 @@ const MyOffersSection = ({ userId }: { userId: string }) => {
           userProfile?.username || "Un vendeur",
           offer.listingId
         ).catch(error => {
-          console.error("Erreur notification:", error);
+          logger.error("Erreur notification:", error);
         });
       }
       
@@ -738,7 +759,7 @@ const MyOffersSection = ({ userId }: { userId: string }) => {
         amount,
         selectedOffer.listingId
       ).catch(error => {
-        console.error("Erreur notification:", error);
+        logger.error("Erreur notification:", error);
       });
       
       toast({
@@ -1045,7 +1066,7 @@ const CardStatsSection = () => {
 
   const handleSearch = async () => {
     const input = searchCode.trim().toLowerCase();
-    console.log("🔍 [Profile] Recherche pour:", input);
+    logger.log("🔎 [Profile] Recherche pour:", input);
     
     if (!input) {
       toast({ 
@@ -1062,12 +1083,12 @@ const CardStatsSection = () => {
 
       const { getCardByCode, codeToCardMap } = await import("@/lib/cardSystem");
       const directCard = getCardByCode(input.toUpperCase());
-      console.log("📇 [Profile] Carte directe trouvée:", directCard);
+      logger.log("🗂️ [Profile] Carte directe trouvée:", directCard);
       
       if (directCard && directCard.found) {
         targetCode = directCard.code;
       } else {
-        console.log("🔎 [Profile] Recherche par nom dans codeToCardMap...");
+        logger.log("🔍 [Profile] Recherche par nom dans codeToCardMap...");
         let foundCode: string | null = null;
         
         for (const season of Object.keys(codeToCardMap)) {
@@ -1082,13 +1103,13 @@ const CardStatsSection = () => {
           }) || null;
           
           if (foundCode) {
-            console.log("✅ [Profile] Code trouvé:", foundCode, "dans la saison:", season);
+            logger.log("✅ [Profile] Code trouvé:", foundCode, "dans la saison:", season);
             break;
           }
         }
         
         if (!foundCode) {
-          console.log("❌ [Profile] Aucune carte trouvée pour:", input);
+          logger.log("❌ [Profile] Aucune carte trouvée pour:", input);
           toast({ 
             title: "Non trouvé", 
             description: `Aucune carte ne correspond à "${searchCode}". Vérifiez l'orthographe.`,
@@ -1101,12 +1122,12 @@ const CardStatsSection = () => {
         targetCode = foundCode;
       }
 
-      console.log("🎯 [Profile] Code cible final:", targetCode);
-      console.log("📊 [Profile] Appel getMarketStats pour:", targetCode);
+      logger.log("🎯 [Profile] Code cible final:", targetCode);
+      logger.log("📊 [Profile] Appel getMarketStats pour:", targetCode);
       
       const result = await getMarketStats(targetCode);
-      console.log("📈 [Profile] Stats récupérées:", result);
-      console.log("💰 [Profile] Prix history:", result?.priceHistory);
+      logger.log("📈 [Profile] Stats récupérées:", result);
+      logger.log("💰 [Profile] Prix history:", result?.priceHistory);
       
       if (!result) {
         toast({ 
@@ -1129,7 +1150,7 @@ const CardStatsSection = () => {
         });
       }
     } catch (error: any) {
-      console.error("❌ [Profile] Erreur recherche stats:", error);
+      logger.error("❌ [Profile] Erreur recherche stats:", error);
       toast({ 
         title: "Erreur", 
         description: error.message || "Impossible de charger les statistiques.", 
@@ -1141,7 +1162,7 @@ const CardStatsSection = () => {
   };
 
   const getPriceChange = (history: Array<{ date: number; price: number }>) => {
-    if (history.length < 2) return null;
+    if (!history || !Array.isArray(history) || history.length < 2) return null;
     const oldest = history[0].price;
     const newest = history[history.length - 1].price;
     const change = ((newest - oldest) / oldest) * 100;
@@ -1152,9 +1173,9 @@ const CardStatsSection = () => {
   };
 
   const PriceHistoryChart = ({ history }: { history: Array<{ date: number; price: number }> }) => {
-    console.log("📊 [Profile] PriceHistoryChart appelé avec:", history);
+    logger.log("📊 [Profile] PriceHistoryChart appelé avec:", history);
     
-    if (!history || history.length === 0) {
+    if (!history || !Array.isArray(history) || history.length === 0) {
       return (
         <div className="h-32 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
           <p className="text-sm text-muted-foreground">Aucun historique disponible</p>
@@ -1162,8 +1183,15 @@ const CardStatsSection = () => {
       );
     }
 
-    const validHistory = history.filter(h => h && typeof h.price === 'number' && h.price > 0);
-    console.log("✅ [Profile] Historique valide filtré:", validHistory);
+    const validHistory = history.filter(h => {
+      return h && 
+             typeof h === 'object' && 
+             typeof h.price === 'number' && 
+             typeof h.date === 'number' &&
+             h.price > 0;
+    });
+    
+    logger.log("✅ [Profile] Historique valide filtré:", validHistory);
     
     if (validHistory.length === 0) {
       return (
@@ -1256,8 +1284,8 @@ const CardStatsSection = () => {
             <div className="flex items-start justify-between">
               <div>
                 <CardTitle className="text-xl flex items-center gap-2">
-                  {stats.cardCode}
-                  {getPriceChange(stats.priceHistory) && (
+                  {stats.cardCode || "Carte inconnue"}
+                  {stats.priceHistory && stats.priceHistory.length > 0 && getPriceChange(stats.priceHistory) && (
                     <Badge
                       variant="outline"
                       className={
@@ -1276,12 +1304,12 @@ const CardStatsSection = () => {
                   )}
                 </CardTitle>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Données sur {stats.priceHistory.length} vente(s)
+                  Données sur {stats.priceHistory?.length || 0} vente(s)
                 </p>
               </div>
               <Badge className="bg-primary">
                 <ShoppingBag className="h-3 w-3 mr-1" />
-                {stats.totalSales} ventes
+                {stats.totalSales || 0} ventes
               </Badge>
             </div>
           </CardHeader>
@@ -1339,7 +1367,13 @@ const CardStatsSection = () => {
                 <BarChart3 className="h-4 w-4" />
                 Historique des Prix
               </h3>
-              <PriceHistoryChart history={stats.priceHistory} />
+              {stats.priceHistory && stats.priceHistory.length > 0 ? (
+                <PriceHistoryChart history={stats.priceHistory} />
+              ) : (
+                <div className="h-32 bg-muted/50 rounded-lg p-4 flex items-center justify-center">
+                  <p className="text-sm text-muted-foreground">Aucun historique disponible</p>
+                </div>
+              )}
             </div>
 
             <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4">
@@ -1435,11 +1469,13 @@ const Profile = () => {
 
   useEffect(() => {
     if (!user) return;
-    const loadAgentData = async () => {
-      setIsLoadingAgent(true);
+
+    setIsLoadingAgent(true);
+    const userRef = ref(database, `users/${user.uid}`);
+
+    // ✅ Listener temps réel pour synchronisation automatique
+    const unsubscribe = onValue(userRef, (snapshot) => {
       try {
-        const userRef = ref(database, `users/${user.uid}`);
-        const snapshot = await get(userRef);
         if (snapshot.exists()) {
           const data = snapshot.val();
           const equipped = {
@@ -1449,29 +1485,32 @@ const Profile = () => {
             title: data.title || "",
             effect: data.effect || "",
           };
-          
-          setAgentData({ 
-            fortune: data.fortune || 0, 
+
+          setAgentData({
+            fortune: data.fortune || 0,
             bettingGains: data.bettingGains || 0,
             equipped,
             inventory: data.inventory || {},
             cards: data.cards || {},
           });
-          
+
           if (equipped.theme) {
             const themeItem = SHOP_ITEMS.find(item => item.id === equipped.theme);
             if (themeItem && themeItem.preview) {
               applyTheme(themeItem.preview);
             }
           }
+
+          logger.log("✅ [Profile] Données mises à jour en temps réel");
         }
       } catch (error) {
-        console.error("Erreur chargement données utilisateur:", error);
+        logger.error("Erreur chargement données utilisateur:", error);
       } finally {
         setIsLoadingAgent(false);
       }
-    };
-    loadAgentData();
+    });
+
+    return () => unsubscribe();
   }, [user]);
 
   useEffect(() => {
@@ -1486,7 +1525,7 @@ const Profile = () => {
         setFriends(friendsList);
         setFriendRequests(requests);
       } catch (error) {
-        console.error("Erreur chargement amis:", error);
+        logger.error("Erreur chargement amis:", error);
       } finally {
         setIsLoadingFriends(false);
       }
@@ -1506,7 +1545,7 @@ const Profile = () => {
         const userSettings = await getUserSettings(user.uid);
         setSettings(userSettings);
       } catch (error) {
-        console.error("Erreur chargement paramètres:", error);
+        logger.error("Erreur chargement paramètres:", error);
       } finally {
         setIsLoadingSettings(false);
       }
@@ -1688,7 +1727,7 @@ const Profile = () => {
           onValueChange={(v) => setActiveTab(v as typeof activeTab)}
           className="w-full"
         >
-          <TabsList className="grid w-full grid-cols-5">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 md:grid-cols-5">
             <TabsTrigger value="overview">Résumé</TabsTrigger>
             <TabsTrigger value="stats">Stats</TabsTrigger>
             <TabsTrigger value="club">Club</TabsTrigger>
@@ -1842,7 +1881,8 @@ const Profile = () => {
         </Card>
       </motion.div>
 
-      {/* DIALOGS - À ajouter juste avant </AppLayout> dans la partie 5 */}
+      {/* DIALOGS - Suite dans partie 5b */}
+{/* DIALOGS */}
       
       <Dialog open={showNotifications} onOpenChange={setShowNotifications}>
         <DialogContent>
@@ -1911,57 +1951,60 @@ const Profile = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {friends.map((friend) => (
-                  <div
-                    key={friend.id}
-                    className="flex items-center justify-between p-3 rounded-lg bg-surface-alt hover:bg-surface-alt/80 transition-colors cursor-pointer"
-                    onClick={() => {
-                      setSelectedFriend({ id: friend.id, username: friend.username });
-                      setShowFriends(false);
-                    }}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="text-2xl">
-                        {friend.avatar ? (
-                          <span>{SHOP_ITEMS.find((item) => item.id === friend.avatar)?.icon || "😊"}</span>
-                        ) : (
-                          "😊"
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium">{friend.username}</p>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>ELO: {friend.eloRating}</span>
-                          <span>•</span>
-                          <span
-                            className={
-                              friend.status === "online"
-                                ? "text-green-500 flex items-center gap-1"
-                                : "text-muted-foreground"
-                            }
-                          >
-                            <span
-                              className={`w-2 h-2 rounded-full ${
-                                friend.status === "online" ? "bg-green-500" : "bg-muted-foreground"
-                              }`}
-                            />
-                            {friend.status === "online" ? "En ligne" : "Hors ligne"}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRemoveFriend(friend.id, friend.username);
+                {friends.map((friend) => {
+                  const friendAvatar = (friend.avatar && friend.avatar !== "")
+  ? SHOP_ITEMS.find((item) => item && item.id === friend.avatar) 
+  : null;
+                  const avatarIcon = friendAvatar?.icon || "😊";
+                  
+                  return (
+                    <div
+                      key={friend.id}
+                      className="flex items-center justify-between p-3 rounded-lg bg-surface-alt hover:bg-surface-alt/80 transition-colors cursor-pointer"
+                      onClick={() => {
+                        setSelectedFriend({ id: friend.id, username: friend.username });
+                        setShowFriends(false);
                       }}
                     >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
+                      <div className="flex items-center gap-3">
+                        <div className="text-2xl">
+                          {avatarIcon}
+                        </div>
+                        <div>
+                          <p className="font-medium">{friend.username}</p>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>ELO: {friend.eloRating}</span>
+                            <span>•</span>
+                            <span
+                              className={
+                                friend.status === "online"
+                                  ? "text-green-500 flex items-center gap-1"
+                                  : "text-muted-foreground"
+                              }
+                            >
+                              <span
+                                className={`w-2 h-2 rounded-full ${
+                                  friend.status === "online" ? "bg-green-500" : "bg-muted-foreground"
+                                }`}
+                              />
+                              {friend.status === "online" ? "En ligne" : "Hors ligne"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveFriend(friend.id, friend.username);
+                        }}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1996,6 +2039,10 @@ const Profile = () => {
                 {searchResults.map((user) => {
                   const isAlreadyFriend = friends.some((f) => f.id === user.id);
                   const isSending = isSendingRequest === user.id;
+                  const userAvatar = (user.avatar && user.avatar !== "")
+  ? SHOP_ITEMS.find((item) => item && item.id === user.avatar) 
+  : null;
+                  const avatarIcon = userAvatar?.icon || "😊";
 
                   return (
                     <div
@@ -2004,11 +2051,7 @@ const Profile = () => {
                     >
                       <div className="flex items-center gap-3">
                         <div className="text-2xl">
-                          {user.avatar ? (
-                            <span>{SHOP_ITEMS.find((item) => item.id === user.avatar)?.icon || "😊"}</span>
-                          ) : (
-                            "😊"
-                          )}
+                          {avatarIcon}
                         </div>
                         <div>
                           <p className="font-medium">{user.username}</p>
@@ -2250,7 +2293,7 @@ const Profile = () => {
         </DialogContent>
       </Dialog>
 
-      <FriendProfileDialog 
+     <FriendProfileDialog 
         isOpen={!!selectedFriend} 
         onClose={() => { 
           setSelectedFriend(null); 
@@ -2260,10 +2303,9 @@ const Profile = () => {
         friendUsername={selectedFriend?.username || ""} 
         onRemoveFriend={handleRemoveFriend} 
         canRemove={true} 
-      />
+      /> 
     </AppLayout>
   );
 };
 
 export default Profile;
-

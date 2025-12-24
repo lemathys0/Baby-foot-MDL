@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { ref, get, update } from 'firebase/database';
 import { database } from '@/lib/firebase';
+import { logger } from "@/utils/logger";
+import { addFortuneHistoryEntry } from '@/lib/firebaseExtended';
 
 const DAILY_BONUS_AMOUNT = 5;
 const BONUS_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 heures
@@ -34,13 +36,13 @@ export const useDailyBonus = (userId: string | undefined) => {
 
     const checkBonusStatus = async () => {
       try {
-        console.log('🎁 [DailyBonus] Vérification statut pour:', userId);
+        logger.log('🎁 [DailyBonus] Vérification statut pour:', userId);
         const userRef = ref(database, `users/${userId}`);
         const snapshot = await get(userRef);
 
         if (snapshot.exists()) {
           const userData = snapshot.val();
-          console.log('🎁 [DailyBonus] Données utilisateur:', {
+          logger.log('🎁 [DailyBonus] Données utilisateur:', {
             hasLastBonusClaim: !!userData.lastBonusClaim,
             hasCreatedAt: !!userData.createdAt,
             lastBonusClaim: userData.lastBonusClaim,
@@ -51,17 +53,17 @@ export const useDailyBonus = (userId: string | undefined) => {
           
           // ✅ Si les données sont manquantes, les initialiser
           if (!userData.lastBonusClaim || !userData.createdAt) {
-            console.log('⚠️ [DailyBonus] Données manquantes, initialisation...');
+            logger.log('⚠️ [DailyBonus] Données manquantes, initialisation...');
             const initTimestamp = now;
-            
+
             await update(userRef, {
               createdAt: initTimestamp,
-              lastBonusClaim: initTimestamp,
+              lastBonusClaim: initTimestamp - BONUS_INTERVAL_MS, // Permettre le premier bonus immédiatement
               totalDailyBonus: 0,
               dailyBonusStreak: 0,
             });
-            
-            console.log('✅ [DailyBonus] Données initialisées');
+
+            logger.log('✅ [DailyBonus] Données initialisées, bonus disponible immédiatement');
           }
           
           // Vérifier si les données existent, sinon utiliser des valeurs par défaut
@@ -74,7 +76,7 @@ export const useDailyBonus = (userId: string | undefined) => {
           const canClaim = now >= nextBonusTime;
           const timeUntilNext = canClaim ? 0 : nextBonusTime - now;
 
-          console.log('🎁 [DailyBonus] Calculs:', {
+          logger.log('🎁 [DailyBonus] Calculs:', {
             now,
             lastBonusClaim,
             nextBonusTime,
@@ -112,7 +114,7 @@ export const useDailyBonus = (userId: string | undefined) => {
           });
         }
       } catch (error) {
-        console.error('❌ Erreur vérification bonus quotidien:', error);
+        logger.error('❌ Erreur vérification bonus quotidien:', error);
       } finally {
         setIsLoading(false);
       }
@@ -172,7 +174,15 @@ export const useDailyBonus = (userId: string | undefined) => {
         dailyBonusStreak: newStreak,
       });
 
-      console.log(`✅ Bonus quotidien réclamé: +${DAILY_BONUS_AMOUNT}₣ (Nouveau solde: ${newFortune}₣)`);
+      // Enregistrer dans l'historique
+      await addFortuneHistoryEntry(
+        userId,
+        newFortune,
+        DAILY_BONUS_AMOUNT,
+        `Bonus quotidien (Série: ${newStreak} jours)`
+      );
+
+      logger.log(`✅ Bonus quotidien réclamé: +${DAILY_BONUS_AMOUNT}₣ (Nouveau solde: ${newFortune}₣)`);
 
       // Mettre à jour l'état local
       setBonusStatus({
@@ -186,7 +196,7 @@ export const useDailyBonus = (userId: string | undefined) => {
 
       return { success: true, newBalance: newFortune };
     } catch (error) {
-      console.error('❌ Erreur réclamation bonus:', error);
+      logger.error('❌ Erreur réclamation bonus:', error);
       return { success: false, error: 'Erreur lors de la réclamation' };
     } finally {
       setIsClaiming(false);
@@ -205,7 +215,7 @@ export const useDailyBonus = (userId: string | undefined) => {
       }
       return `${minutes}m`;
     } catch (error) {
-      console.error('Erreur formatage temps:', error);
+      logger.error('Erreur formatage temps:', error);
       return 'N/A';
     }
   };

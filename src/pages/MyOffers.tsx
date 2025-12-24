@@ -23,6 +23,7 @@ import {
   type Offer,
 } from "@/lib/firebaseMarket";
 import { motion } from "framer-motion";
+import { logger } from '@/utils/logger';
 import {
   MessageSquare,
   Check,
@@ -57,7 +58,7 @@ const MyOffers = () => {
       setReceivedOffers(received);
       setSentOffers(sent);
     } catch (error) {
-      console.error("Erreur chargement offres:", error);
+      logger.error("Erreur chargement offres:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger les offres.",

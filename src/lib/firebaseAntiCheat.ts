@@ -1,5 +1,6 @@
 import { ref, get, set, update, remove, push, query, orderByChild, limitToLast } from "firebase/database";
 import { database } from "./firebase";
+import { logger } from "@/utils/logger";
 
 export interface SuspiciousActivity {
   id: string;
@@ -55,7 +56,7 @@ export const getSuspiciousActivities = async (): Promise<SuspiciousActivity[]> =
     // Trier par timestamp décroissant (plus récent en premier)
     return activities.sort((a, b) => b.timestamp - a.timestamp);
   } catch (error) {
-    console.error("Erreur récupération activités suspectes:", error);
+    logger.error("Erreur récupération activités suspectes:", error);
     throw new Error("Impossible de récupérer les activités suspectes");
   }
 };
@@ -88,7 +89,7 @@ export const getAntiCheatStats = async (): Promise<AntiCheatStats> => {
 
     return stats;
   } catch (error) {
-    console.error("Erreur récupération stats anti-cheat:", error);
+    logger.error("Erreur récupération stats anti-cheat:", error);
     throw new Error("Impossible de récupérer les statistiques");
   }
 };
@@ -113,7 +114,7 @@ export const createSuspiciousActivity = async (
     
     return newActivityRef.key!;
   } catch (error) {
-    console.error("Erreur création activité suspecte:", error);
+    logger.error("Erreur création activité suspecte:", error);
     throw new Error("Impossible de créer l'activité suspecte");
   }
 };
@@ -136,7 +137,7 @@ export const resolveActivity = async (activityId: string, resolvedBy?: string): 
       resolvedBy: resolvedBy || "admin",
     });
   } catch (error) {
-    console.error("Erreur résolution activité:", error);
+    logger.error("Erreur résolution activité:", error);
     throw new Error("Impossible de résoudre l'activité");
   }
 };
@@ -149,7 +150,7 @@ export const deleteActivity = async (activityId: string): Promise<void> => {
     const activityRef = ref(database, `suspicious_activities/${activityId}`);
     await remove(activityRef);
   } catch (error) {
-    console.error("Erreur suppression activité:", error);
+    logger.error("Erreur suppression activité:", error);
     throw new Error("Impossible de supprimer l'activité");
   }
 };
@@ -312,7 +313,7 @@ export const cleanOldResolvedActivities = async (): Promise<number> => {
     
     return deletedCount;
   } catch (error) {
-    console.error("Erreur nettoyage activités:", error);
+    logger.error("Erreur nettoyage activités:", error);
     throw new Error("Impossible de nettoyer les activités");
   }
 };

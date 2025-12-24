@@ -1,13 +1,27 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig(({ mode }) => ({
   server: {
     host: "::",
     port: 8080,
   },
-  plugins: [react()],
+  
+  plugins: [
+    react(),
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'public',
+      filename: 'firebase-messaging-sw.js',
+      injectRegister: null, // On enregistre manuellement
+      manifest: false, // On utilise manifest.webmanifest
+      injectManifest: {
+        injectionPoint: undefined
+      }
+    })
+  ],
   
   resolve: {
     alias: {
@@ -15,37 +29,31 @@ export default defineConfig(({ mode }) => ({
     },
     dedupe: ['react', 'react-dom'],
   },
-
+  
   build: {
     chunkSizeWarningLimit: 1000,
     
     rollupOptions: {
       output: {
-        // IMPORTANT: Contrôler strictement l'ordre des chunks
         manualChunks(id) {
-          // 1. React et React-DOM en PREMIER (chargés avant tout)
           if (id.includes('node_modules/react/') || 
               id.includes('node_modules/react-dom/')) {
             return 'vendor-react';
           }
           
-          // 2. Ensuite Firebase
           if (id.includes('node_modules/firebase') || 
               id.includes('node_modules/@firebase')) {
             return 'vendor-firebase';
           }
           
-          // 3. Puis Framer Motion
           if (id.includes('node_modules/framer-motion')) {
             return 'vendor-framer';
           }
           
-          // 4. Radix UI (shadcn/ui)
           if (id.includes('node_modules/@radix-ui')) {
             return 'vendor-radix';
           }
           
-          // 5. Autres bibliothèques UI
           if (id.includes('node_modules/lucide-react') || 
               id.includes('node_modules/cmdk') ||
               id.includes('node_modules/sonner') ||
@@ -54,7 +62,6 @@ export default defineConfig(({ mode }) => ({
             return 'vendor-ui';
           }
           
-          // 6. React Router
           if (id.includes('node_modules/react-router')) {
             return 'vendor-router';
           }
@@ -62,7 +69,7 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-
+  
   optimizeDeps: {
     include: [
       'react',

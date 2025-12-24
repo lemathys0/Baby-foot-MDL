@@ -1,6 +1,7 @@
 import { motion } from "framer-motion";
 import { User, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { memo } from "react";
 
 interface LeaderboardItemProps {
   rank: number;
@@ -12,7 +13,7 @@ interface LeaderboardItemProps {
   index: number;
 }
 
-export function LeaderboardItem({
+export const LeaderboardItem = memo(function LeaderboardItem({
   rank,
   username,
   avatar,
@@ -87,5 +88,14 @@ export function LeaderboardItem({
       </div>
     </motion.div>
   );
-}
+}, (prevProps, nextProps) => {
+  // Ne re-render que si les props importantes changent
+  return (
+    prevProps.rank === nextProps.rank &&
+    prevProps.username === nextProps.username &&
+    prevProps.eloRating === nextProps.eloRating &&
+    prevProps.wins === nextProps.wins &&
+    prevProps.losses === nextProps.losses
+  );
+});
 

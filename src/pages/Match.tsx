@@ -10,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { onQueueUpdate, onRecentMatchesUpdate, QueuedPlayer, Match } from "@/lib/firebaseSync";
 import { joinMatchQueue, leaveMatchQueue } from "@/lib/firebaseMatch";
+import { logger } from '@/utils/logger';
 
 const MatchPage = () => {
   const { user, userProfile } = useAuth();
@@ -75,7 +76,7 @@ const MatchPage = () => {
         description: "Vous avez rejoint la file d'attente!",
       });
     } catch (error) {
-      console.error("Erreur:", error);
+      logger.error("Erreur:", error);
       toast({
         title: "Erreur",
         description: "Impossible de rejoindre la file",
@@ -98,7 +99,7 @@ const MatchPage = () => {
         description: "Vous avez quitté la file d'attente.",
       });
     } catch (error) {
-      console.error("Erreur:", error);
+      logger.error("Erreur:", error);
       toast({
         title: "Erreur",
         description: "Impossible de quitter la file",

@@ -23,6 +23,8 @@ import { ref, get, update, remove, set } from "firebase/database";
 import { database } from "@/lib/firebase";
 import { getAuth, createUserWithEmailAndPassword } from "firebase/auth";
 import { sendAdminInfo } from "@/lib/firebaseChat";
+import { logger } from '@/utils/logger';
+import { addFortuneHistoryEntry } from "@/lib/firebaseExtended";
 
 const AdminPanel = () => {
   const { user, userProfile } = useAuth();
@@ -139,7 +141,7 @@ const AdminPanel = () => {
       
       setIsLoading(false);
     } catch (error) {
-      console.error("Erreur chargement données admin:", error);
+      logger.error("Erreur chargement données admin:", error);
       toast({
         title: "Erreur",
         description: "Impossible de charger les données",
@@ -180,7 +182,7 @@ const AdminPanel = () => {
       setInfoMessage("");
       setShowInfoMessageDialog(false);
     } catch (error: any) {
-      console.error("Erreur envoi message info:", error);
+      logger.error("Erreur envoi message info:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible d'envoyer le message",
@@ -232,7 +234,7 @@ const handleAddUser = async () => {
       
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur création utilisateur:", error);
+      logger.error("Erreur création utilisateur:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -257,6 +259,20 @@ const handleAddUser = async () => {
 
       await update(userRef, updates);
 
+      // Enregistrer dans l'historique si la fortune a été modifiée
+      if (editUserFortune) {
+        const oldFortune = selectedUser.fortune || 0;
+        const newFortune = parseInt(editUserFortune);
+        const change = newFortune - oldFortune;
+
+        await addFortuneHistoryEntry(
+          selectedUser.id,
+          newFortune,
+          change,
+          `Ajustement admin par ${userProfile?.username || 'Admin'}`
+        );
+      }
+
       toast({
         title: "✅ Utilisateur modifié",
         description: "Les modifications ont été sauvegardées",
@@ -270,7 +286,7 @@ const handleAddUser = async () => {
       
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur modification utilisateur:", error);
+      logger.error("Erreur modification utilisateur:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -298,7 +314,7 @@ const handleAddUser = async () => {
       
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur suppression utilisateur:", error);
+      logger.error("Erreur suppression utilisateur:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -345,7 +361,7 @@ const handleAddUser = async () => {
         loadAdminData();
       }
     } catch (error: any) {
-      console.error("Erreur gestion fortune:", error);
+      logger.error("Erreur gestion fortune:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -389,7 +405,7 @@ const handleAddUser = async () => {
         loadAdminData();
       }
     } catch (error: any) {
-      console.error("Erreur attribution badge:", error);
+      logger.error("Erreur attribution badge:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -432,7 +448,7 @@ const handleAddUser = async () => {
       
       await loadAdminData();
     } catch (error: any) {
-      console.error("Erreur bannissement:", error);
+      logger.error("Erreur bannissement:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible de bannir l'utilisateur",
@@ -475,7 +491,7 @@ const handleAddUser = async () => {
       
       await loadAdminData();
     } catch (error: any) {
-      console.error("Erreur débannissement:", error);
+      logger.error("Erreur débannissement:", error);
       toast({
         title: "Erreur",
         description: error.message || "Impossible de débannir l'utilisateur",
@@ -503,7 +519,7 @@ const handleAddUser = async () => {
       
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur suppression match:", error);
+      logger.error("Erreur suppression match:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -536,7 +552,7 @@ const handleAddUser = async () => {
 
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur reset ELO:", error);
+      logger.error("Erreur reset ELO:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -567,7 +583,7 @@ const handleAddUser = async () => {
 
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur ajout fortune:", error);
+      logger.error("Erreur ajout fortune:", error);
       toast({
         title: "Erreur",
         description: error.message,
@@ -595,7 +611,7 @@ const handleAddUser = async () => {
 
       loadAdminData();
     } catch (error: any) {
-      console.error("Erreur suppression matchs:", error);
+      logger.error("Erreur suppression matchs:", error);
       toast({
         title: "Erreur",
         description: error.message,

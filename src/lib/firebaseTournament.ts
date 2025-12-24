@@ -3,7 +3,8 @@
 
 import { ref, get, runTransaction, update } from "firebase/database";
 import { database } from "./firebase";
-
+import { addFortuneHistoryEntry } from "./firebaseExtended";
+import { logger } from "@/utils/logger";
 // ============= TYPES =============
 export interface TournamentPlayer {
   userId: string;
@@ -171,6 +172,7 @@ export async function createNextRoundSafe(
           lockedBy: "",
           lockedAt: 0,
         };
+
         return tournament;
       }
 
@@ -257,7 +259,7 @@ export async function createNextRoundSafe(
       newRound,
     };
   } catch (error: any) {
-    console.error("Erreur création round:", error);
+    logger.error("Erreur création round:", error);
     return {
       success: false,
       message: error.message || "Erreur lors de la création du round",
@@ -343,7 +345,7 @@ export async function checkRoundCompletion(
 
     return { isComplete, winnersCount };
   } catch (error) {
-    console.error("Erreur vérification round:", error);
+    logger.error("Erreur vérification round:", error);
     return { isComplete: false, winnersCount: 0 };
   }
 }
@@ -368,7 +370,138 @@ export async function validateOrganizerPermission(
     const tournament = snapshot.val() as Tournament;
     return tournament.organizerId === userId;
   } catch (error) {
-    console.error("Erreur validation permission:", error);
+    logger.error("Erreur validation permission:", error);
     return false;
+  }
+}
+
+
+export async function distributeTournamentPrizes(
+  tournamentId: string = "active"
+): Promise<{ success: boolean; message: string }> {
+  const tournamentRef = ref(database, `tournaments/${tournamentId}`);
+
+  try {
+    const snapshot = await get(tournamentRef);
+    if (!snapshot.exists()) {
+      return { success: false, message: "Tournoi introuvable" };
+    }
+
+    const tournament = snapshot.val() as Tournament;
+
+    if (tournament.status !== "completed") {
+      return { success: false, message: "Le tournoi n'est pas terminé" };
+    }
+
+    if (tournament.winners.length === 0) {
+      return { success: false, message: "Aucun gagnant trouvé" };
+    }
+
+    // Calculer les positions finales
+    const matches = Object.values(tournament.matches || {});
+    const maxRound = Math.max(...matches.map(m => m.round));
+    
+    // Trouver les joueurs par position
+    const finalMatches = matches.filter(m => m.round === maxRound && m.status === "completed");
+    
+    if (finalMatches.length === 0) {
+      return { success: false, message: "Aucun match final trouvé" };
+    }
+
+    // Identifier le gagnant (1er), le finaliste (2ème), et les demi-finalistes (3ème)
+    const winnerId = tournament.winners[0];
+    
+    // Le finaliste est le perdant du match final
+    const finalMatch = finalMatches[0];
+    const finalistId = finalMatch.winnerId === finalMatch.team1.playerIds[0]
+      ? finalMatch.team2.playerIds[0]
+      : finalMatch.team1.playerIds[0];
+
+    // Les demi-finalistes sont les perdants des demi-finales
+    const semiFinalsRound = maxRound - 1;
+    const semiFinalMatches = matches.filter(m => m.round === semiFinalsRound && m.status === "completed");
+    const semiFinalistIds = semiFinalMatches.map(m => 
+      m.winnerId === m.team1.playerIds[0] ? m.team2.playerIds[0] : m.team1.playerIds[0]
+    );
+
+    // Calculer les montants
+    const firstPrize = Math.floor(tournament.prizePool * 0.5);
+    const secondPrize = Math.floor(tournament.prizePool * 0.3);
+    const thirdPrize = Math.floor(tournament.prizePool * 0.2);
+
+    const updates: { [key: string]: any } = {};
+
+    // 1er place
+    const winnerRef = ref(database, `users/${winnerId}`);
+    const winnerSnap = await get(winnerRef);
+    if (winnerSnap.exists()) {
+      const winnerData = winnerSnap.val();
+      const newFortune = (winnerData.fortune || 0) + firstPrize;
+      updates[`users/${winnerId}/fortune`] = newFortune;
+
+      // ✅ FIX: Historique avec signature correcte (4 paramètres)
+      await addFortuneHistoryEntry(
+        winnerId,
+        newFortune,
+        firstPrize,
+        "🏆 1ère place - Tournoi Quotidien"
+      );
+    }
+
+    // 2ème place
+    if (finalistId) {
+      const finalistRef = ref(database, `users/${finalistId}`);
+      const finalistSnap = await get(finalistRef);
+      if (finalistSnap.exists()) {
+        const finalistData = finalistSnap.val();
+        const newFortune = (finalistData.fortune || 0) + secondPrize;
+        updates[`users/${finalistId}/fortune`] = newFortune;
+
+        // ✅ FIX: Historique avec signature correcte (4 paramètres)
+        await addFortuneHistoryEntry(
+          finalistId,
+          newFortune,
+          secondPrize,
+          "🥈 2ème place - Tournoi Quotidien"
+        );
+      }
+    }
+
+    // 3ème place (partagé entre les 2 demi-finalistes)
+    const thirdPrizePerPlayer = Math.floor(thirdPrize / Math.max(semiFinalistIds.length, 1));
+    for (const semiFinalistId of semiFinalistIds) {
+      const semiRef = ref(database, `users/${semiFinalistId}`);
+      const semiSnap = await get(semiRef);
+      if (semiSnap.exists()) {
+        const semiData = semiSnap.val();
+        const newFortune = (semiData.fortune || 0) + thirdPrizePerPlayer;
+        updates[`users/${semiFinalistId}/fortune`] = newFortune;
+
+        // ✅ FIX: Historique avec signature correcte (4 paramètres)
+        await addFortuneHistoryEntry(
+          semiFinalistId,
+          newFortune,
+          thirdPrizePerPlayer,
+          "🥉 3ème place - Tournoi Quotidien"
+        );
+      }
+    }
+
+    // Marquer le tournoi comme "prizes_distributed"
+    updates[`tournaments/${tournamentId}/prizesDistributed`] = true;
+    updates[`tournaments/${tournamentId}/prizesDistributedAt`] = Date.now();
+
+    await update(ref(database), updates);
+
+    return {
+      success: true,
+      message: `Prix distribués: 1er (${firstPrize}€), 2ème (${secondPrize}€), 3ème (${thirdPrizePerPlayer}€)`
+    };
+  } catch (error: any) {
+    logger.error("Erreur distribution prix:", error);
+    return {
+      success: false,
+      message: error.message || "Erreur distribution des prix"
+    };
   }
 }

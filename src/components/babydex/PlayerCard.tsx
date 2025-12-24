@@ -1,5 +1,6 @@
 import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { memo } from "react";
 
 type Rarity = "bronze" | "silver" | "gold" | "espoir" | "icone" | "future-star" | "god" | "creator" | "unknown";
 
@@ -24,7 +25,7 @@ const rarityLabels: Record<Rarity, string> = {
   unknown: "Inconnu",
 };
 
-export function PlayerCard({
+export const PlayerCard = memo(function PlayerCard({
   name,
   code,
   rarity,
@@ -86,4 +87,11 @@ export function PlayerCard({
       </div>
     </motion.div>
   );
-}
+}, (prevProps, nextProps) => {
+  // Ne re-render que si les props essentielles changent
+  return (
+    prevProps.code === nextProps.code &&
+    prevProps.owned === nextProps.owned &&
+    prevProps.image === nextProps.image
+  );
+});

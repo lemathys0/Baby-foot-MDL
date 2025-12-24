@@ -1,15 +1,16 @@
-import { Home, Trophy, Users, Layers, User, Coins } from "lucide-react";
+import { Home, Trophy, Users, Layers, User, Coins, Target } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { QuestBadge } from "./QuestBadge";
 
 const navItems = [
-  { to: "/", icon: Home, label: "Accueil" },
-  { to: "/leaderboard", icon: Trophy, label: "Classement" },
-  { to: "/match", icon: Users, label: "Match" },
-  { to: "/babydex", icon: Layers, label: "BabyDex" },
-  { to: "/market", icon: Coins, label: "Marché" },
-  { to: "/profile", icon: User, label: "Profil" },
+  { to: "/", icon: Home, label: "Accueil", badge: null },
+  { to: "/leaderboard", icon: Trophy, label: "Classement", badge: null },
+  { to: "/match", icon: Users, label: "Match", badge: null },
+  { to: "/quests", icon: Target, label: "Quêtes", badge: QuestBadge },
+  { to: "/babydex", icon: Layers, label: "BabyDex", badge: null },
+  { to: "/profile", icon: User, label: "Profil", badge: null },
 ];
 
 export function BottomNav() {
@@ -40,12 +41,15 @@ export function BottomNav() {
                       transition={{ type: "spring", stiffness: 500, damping: 30 }}
                     />
                   )}
-                  <item.icon
-                    className={cn(
-                      "h-5 w-5 transition-all",
-                      isActive && "text-glow-cyan"
-                    )}
-                  />
+                  <div className="relative">
+                    <item.icon
+                      className={cn(
+                        "h-5 w-5 transition-all",
+                        isActive && "text-glow-cyan"
+                      )}
+                    />
+                    {item.badge && <item.badge />}
+                  </div>
                   <span className="relative z-10">{item.label}</span>
                 </>
               )}
