@@ -6,7 +6,7 @@ import { database } from "./firebase";
 import { addFortuneHistoryEntry } from "./firebaseExtended";
 import { logger } from "@/utils/logger";
 import { applyXPBonus, applyFortuneBonus, getClubBonuses } from "./clubBonusSystem";
-import { optimizeMatchData, optimizeBetData, MATCH_TYPE_ENUM } from "./dbOptimization";
+import { optimizeMatchData, optimizeBetData, MATCH_TYPE_ENUM, deoptimizeUserData } from "./dbOptimization";
 
 // ============================
 // 🏆 ELO RANKS SYSTEM
