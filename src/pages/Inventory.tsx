@@ -367,20 +367,20 @@ const Inventory = () => {
                                       style={{ background: item.preview }}
                                     >
                                       <div className="absolute inset-0 flex items-center justify-center">
-                                        <span className="text-2xl">{item.icon}</span>
+                                        <span className="text-2xl">{item?.icon || "🎨"}</span>
                                       </div>
                                     </div>
                                   ) : item.type === "title" && item.preview ? (
                                     <div className="flex flex-col items-center gap-1 mb-1">
                                       <div className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-gradient-to-r from-sky-500/20 via-cyan-500/20 to-indigo-500/20 border border-cyan-400/50">
-                                        <span className="text-base">{item.icon}</span>
+                                        <span className="text-base">{item?.icon || "👑"}</span>
                                         <span className="text-[9px] font-semibold tracking-wide uppercase text-cyan-100 line-clamp-1">
                                           {item.preview}
                                         </span>
                                       </div>
                                     </div>
                                   ) : (
-                                    <div className="text-4xl mb-2">{item.icon || item.preview}</div>
+                                    <div className="text-4xl mb-2">{item?.icon || item?.preview || "✨"}</div>
                                   )}
                                   <p className="text-xs font-medium mb-1 line-clamp-1">{item.name}</p>
                                   {isEquipped ? (

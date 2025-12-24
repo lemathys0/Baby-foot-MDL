@@ -517,21 +517,21 @@ const ShopPage = () => {
                             style={{ backgroundColor: item.preview }}
                           />
                         ) : item.type === "banner" && item.preview ? (
-                          <div 
+                          <div
                             className="w-full h-16 rounded-lg shadow-xl border-2 border-white/20 relative overflow-hidden"
                             style={{ background: item.preview }}
                           >
                             <div className="absolute inset-0 flex items-center justify-center">
-                              <span className="text-2xl">{item.icon}</span>
+                              <span className="text-2xl">{item?.icon || "🎨"}</span>
                             </div>
                           </div>
                         ) : item.type === "title" && item.preview ? (
                           <div className="flex flex-col items-center gap-1">
-                            <span className="text-4xl">{item.icon}</span>
+                            <span className="text-4xl">{item?.icon || "👑"}</span>
                             <span className="text-xs font-bold text-primary">{item.preview}</span>
                           </div>
                         ) : (
-                          <span>{item.icon || "🎁"}</span>
+                          <span>{item?.icon || "🎁"}</span>
                         )}
                       </div>
                       <CardTitle className="text-center text-lg">

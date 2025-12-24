@@ -346,8 +346,8 @@ export function FriendProfileDialog({
                         className="relative p-2 rounded-lg border-2 border-primary bg-primary/5"
                       >
                         <div className={`absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full ${rarityColors[badge.rarity]}`} />
-                        <div className="text-2xl text-center mb-1">{badge.icon}</div>
-                        <p className="text-[10px] font-bold text-center line-clamp-1">{badge.name}</p>
+                        <div className="text-2xl text-center mb-1">{badge?.icon || "🏆"}</div>
+                        <p className="text-[10px] font-bold text-center line-clamp-1">{badge?.name || "Badge"}</p>
                       </motion.div>
                     ))}
                   </div>
